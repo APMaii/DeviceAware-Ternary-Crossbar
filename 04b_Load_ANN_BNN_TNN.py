@@ -54,7 +54,7 @@ FIGURES_DIR = PROJECT_DIR / "figures" / "load_ann_bnn_tnn"
 
 ACADEMIC_COLORS = {
     "ANN": "#1F4E79",  # navy
-    "BNN": "#4A5D73",  # slate
+    "BNN": "#8EC4E6",  # light blue
     "TNN": "#7B2D3B",  # burgundy
 }
 NEG_COLOR = "#1F4E79"
@@ -295,11 +295,12 @@ def _setup_academic_style():
         "font.family": "serif",
         "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
         "mathtext.fontset": "dejavuserif",
-        "font.size": 11,
-        "axes.titlesize": 12,
-        "axes.labelsize": 11,
-        "xtick.labelsize": 10,
-        "ytick.labelsize": 9,
+        "font.size": 13,
+        "axes.titlesize": 14,
+        "axes.labelsize": 13,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 12,
         "axes.titleweight": "normal",
         "axes.linewidth": 0.9,
         "axes.edgecolor": "#2D2D2D",
@@ -352,13 +353,13 @@ def plot_training_loss(histories: dict):
         ax.plot(
             epochs, losses,
             color=ACADEMIC_COLORS[name],
-            linewidth=1.8,
+            linewidth=2.4,
             label=name,
             marker="o",
-            markersize=3.5,
+            markersize=5.0,
             markevery=max(1, len(losses) // 10),
             markerfacecolor="white",
-            markeredgewidth=1.1,
+            markeredgewidth=1.4,
             markeredgecolor=ACADEMIC_COLORS[name],
             zorder=3,
         )
@@ -402,7 +403,7 @@ def plot_layer_weight_summary(infos: dict):
                   linewidth=0.65, width=0.55, zorder=3)
     for bar, v in zip(bars, mean_abs):
         ax.text(bar.get_x() + bar.get_width() / 2, v, f"{v:.3f}",
-                ha="center", va="bottom", fontsize=8.5, color="#1A1A1A")
+                ha="center", va="bottom", fontsize=10.5, color="#1A1A1A")
     ax.set_xticks(x)
     ax.set_xticklabels(layers)
     ax.set_ylabel(r"mean $|w|$")
@@ -426,7 +427,7 @@ def plot_layer_weight_summary(infos: dict):
     ax.set_ylabel("% of weights")
     ax.set_ylim(0, 100)
     ax.set_title(r"BNN  $\{-1,+1\}$", pad=10)
-    ax.legend(frameon=True, fancybox=False, edgecolor="#B0B0B0", fontsize=8)
+    ax.legend(frameon=True, fancybox=False, edgecolor="#B0B0B0", fontsize=10)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="y", zorder=0)
@@ -449,13 +450,13 @@ def plot_layer_weight_summary(infos: dict):
     ax.set_ylabel("% of weights")
     ax.set_ylim(0, 100)
     ax.set_title(r"TNN  $\{-1,0,+1\}$", pad=10)
-    ax.legend(frameon=True, fancybox=False, edgecolor="#B0B0B0", fontsize=8)
+    ax.legend(frameon=True, fancybox=False, edgecolor="#B0B0B0", fontsize=10)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="y", zorder=0)
     ax.set_axisbelow(True)
 
-    fig.suptitle("Layer-wise weight summary", fontsize=12, y=1.03)
+    fig.suptitle("Layer-wise weight summary", fontsize=14, y=1.03)
     fig.tight_layout()
     _save_fig(fig, "09_layer_weight_summary")
     plt.show()
@@ -487,7 +488,7 @@ def plot_comparisons(models, infos, accs, per_class):
         color=[acc_colors[n] for n in names],
         edgecolor="#2D2D2D",
         linewidth=0.65,
-        width=0.52,
+        width=0.58,
         zorder=3,
     )
 
@@ -522,7 +523,7 @@ def plot_comparisons(models, infos, accs, per_class):
             f"{v:.2f}%",
             ha="center",
             va="bottom",
-            fontsize=10,
+            fontsize=12,
             color="#1A1A1A",
             fontweight="semibold" if i == best_i else "normal",
         )
@@ -547,7 +548,7 @@ def plot_comparisons(models, infos, accs, per_class):
     # 2) Per-class accuracy
     fig, ax = plt.subplots(figsize=(11, 4.5), dpi=FIGURE_DPI)
     digits = np.arange(10)
-    width = 0.25
+    width = 0.28
     for i, n in enumerate(names):
         vals = [per_class[n][d] for d in digits]
         ax.bar(digits + (i - 1) * width, vals, width, label=n, color=MODEL_COLORS[n], edgecolor="black")
@@ -585,7 +586,7 @@ def plot_comparisons(models, infos, accs, per_class):
             if col == 0:
                 ax.set_ylabel(f"{li['name']}\ncount")
             ax.set_xlabel("weight")
-    fig.suptitle("Weight distributions per layer", fontsize=13, y=1.01)
+    fig.suptitle("Weight distributions per layer", fontsize=15, y=1.01)
     fig.tight_layout()
     _save_fig(fig, "03_weight_histograms")
     plt.show()
@@ -612,7 +613,7 @@ def plot_comparisons(models, infos, accs, per_class):
     axes[0].set_ylabel("Share of weights (%)")
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.08))
-    fig.suptitle("Weight alphabet composition  (ANN ≈ 0% exact ±1/0)", fontsize=12, y=1.12)
+    fig.suptitle("Weight alphabet composition  (ANN ≈ 0% exact ±1/0)", fontsize=14, y=1.12)
     fig.tight_layout()
     _save_fig(fig, "04_weight_composition")
     plt.show()
@@ -621,7 +622,7 @@ def plot_comparisons(models, infos, accs, per_class):
     # 5) Mean |weight| and sparsity (% exact zeros)
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(11, 4.2), dpi=FIGURE_DPI)
     x = np.arange(len(layer_names))
-    width = 0.25
+    width = 0.28
     for i, n in enumerate(names):
         mean_abs = [np.abs(li["weight"]).mean() for li in infos[n]]
         zeros = [(li["weight"] == 0).mean() * 100 for li in infos[n]]
@@ -656,9 +657,9 @@ def plot_comparisons(models, infos, accs, per_class):
                 p99 = np.percentile(np.abs(w), 99)
                 kw = dict(vmin=-p99, vmax=p99)
             im = ax.imshow(w, aspect="auto", cmap="RdBu_r", **kw)
-            ax.set_title(f"{n} {li['name']} {w.shape[0]}×{w.shape[1]}", fontsize=9)
+            ax.set_title(f"{n} {li['name']} {w.shape[0]}×{w.shape[1]}", fontsize=11)
             plt.colorbar(im, ax=ax, fraction=0.046)
-    fig.suptitle("Weight matrices", fontsize=13)
+    fig.suptitle("Weight matrices", fontsize=15)
     fig.tight_layout()
     _save_fig(fig, "06_weight_heatmaps")
     plt.show()
@@ -677,10 +678,10 @@ def plot_comparisons(models, infos, accs, per_class):
                 ax.imshow(filt, cmap="RdBu_r")
             ax.axis("off")
             if col == 0:
-                ax.set_ylabel(n, fontsize=11)
+                ax.set_ylabel(n, fontsize=13)
             if row == 0:
-                ax.set_title(f"n{col}", fontsize=8)
-    fig.suptitle("fc1 input filters (first 8 neurons, 28×28)", fontsize=12)
+                ax.set_title(f"n{col}", fontsize=10)
+    fig.suptitle("fc1 input filters (first 8 neurons, 28×28)", fontsize=14)
     fig.tight_layout()
     _save_fig(fig, "07_fc1_filters")
     plt.show()
