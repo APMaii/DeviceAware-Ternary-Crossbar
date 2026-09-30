@@ -64,6 +64,8 @@ import glob
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 
 from paths import DEVICE_DATA_DIR
 
@@ -92,9 +94,9 @@ INITIAL_WINDOW_SEC = 1.0
 plt.rcParams.update({
     "font.family": "serif",
     "font.serif": ["Times New Roman", "DejaVu Serif", "serif"],
-    "font.size": 11,
-    "axes.labelsize": 12,
-    "axes.titlesize": 12,
+    "font.size": 13,
+    "axes.labelsize": 14,
+    "axes.titlesize": 14,
     "axes.titleweight": "normal",
     "axes.linewidth": 0.8,
     "axes.edgecolor": "#333333",
@@ -105,7 +107,9 @@ plt.rcParams.update({
     "legend.frameon": True,
     "legend.framealpha": 0.92,
     "legend.edgecolor": "#cccccc",
-    "legend.fontsize": 10,
+    "legend.fontsize": 12,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
     "xtick.direction": "in",
     "ytick.direction": "in",
     "figure.dpi": 120,
@@ -283,15 +287,33 @@ for i in range(num_sweeps):
         "absI": np.abs(I)
     })
 
-plt.figure(figsize=(9, 6))
-for s in sweeps:
-    plt.plot(s["V"], s["I"] * 1e9, color=C_IV, alpha=0.28, linewidth=0.9)
+# Column order in the Excel file: sweep 1 is the first pair, sweep 50 the last.
+# Light = earlier sweep, dark = later sweep.
+sweep_cmap = LinearSegmentedColormap.from_list(
+    "sweep_order", ["#D5D8DE", "#1B3A6B"]
+)
+sweep_norm = Normalize(vmin=1, vmax=num_sweeps)
 
-plt.xlabel("Voltage (V)")
-plt.ylabel("Current (nA)")
-plt.title("APM SiNW SBFET - 50 I-V Hysteresis Sweeps")
-plt.grid(True)
-plt.tight_layout()
+fig, ax = plt.subplots(figsize=(9, 6))
+for s in sweeps:
+    ax.plot(
+        s["V"],
+        s["I"] * 1e9,
+        color=sweep_cmap(sweep_norm(s["sweep"])),
+        linewidth=0.9,
+    )
+
+sweep_guide = ScalarMappable(norm=sweep_norm, cmap=sweep_cmap)
+sweep_guide.set_array([])
+cbar = fig.colorbar(sweep_guide, ax=ax, pad=0.02)
+cbar.set_label("Sweep number")
+cbar.set_ticks([1, 10, 20, 30, 40, num_sweeps])
+
+ax.set_xlabel("Voltage (V)")
+ax.set_ylabel("Current (nA)")
+ax.set_title("APM SiNW SBFET - 50 I-V Hysteresis Sweeps")
+ax.grid(True)
+fig.tight_layout()
 plt.show()
 
 
