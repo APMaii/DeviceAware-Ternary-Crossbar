@@ -1,1 +1,917 @@
-'''In The Name of GodAli Pilehvar MeibodyLast Update : 07 SEP 202608_Real_TNN_Cross_S.pyin 06 , first we compared digital ANN with cross-sim ANN in ideal condition and alsocompare digital TNN with cross-sim TNN in ideal codnition to say that everything is perfect and identical and cross-sim is perfect and sync with pytorch.Then in 07 , we used the data from 05 (device mdoeling) only prorgamming errorand we consider to compare ANN,TNN sonos and APM to say that APM programming error is logical and liek SONOS (most known one) and then we go to comapre TNN vs ANNsytrategy and we decided because of cost and .. and becausse the accuracy not tdrop too high so we can go for TNN.so here in 08 we decided to go with TNN, HERE WE can investigate exactlythe effect of APM programmign error on TNN and also Drift of APM on TNN.'''# ============================================'''                   Imports              '''# ============================================from __future__ import annotationsimport osimport randomimport numpy as npimport torchimport torch.nn as nnimport torch.nn.functional as Ffrom torchvision import datasets, transformsfrom torch.utils.data import DataLoaderimport matplotlib.pyplot as pltfrom datetime import datefrom pathlib import Pathimport torch.optim as optimfrom pathlib import Pathimport matplotlib.pyplot as pltimport numpy as npimport torchimport torch.nn as nnimport torchimport torch.nn as nnfrom torchvision import datasets, transformsfrom torch.utils.data import DataLoaderimport sysfrom pathlib import PathMAIN_DIR = '/Users/apm/Desktop/tern-net'PTH_DIR= f'{MAIN_DIR}/Pth_Models/'CROSS_SIM_DIR = Path(f"{MAIN_DIR}/cross-sim")if str(CROSS_SIM_DIR) not in sys.path:    sys.path.insert(0, str(CROSS_SIM_DIR))from simulator import CrossSimParametersfrom simulator.parameters.xbar_parameters import ADCRangeLimitsfrom simulator.algorithms.dnn.torch.convert import from_torchfrom simulator.algorithms.dnn.torch.convert import convertible_modulesimport pandas as pd# ============================================'''                Variables              '''# ============================================SEED = 42  # change this to try other runs; keep fixed for identical resultsbatch_size = 16BATCH_SIZE = batch_size#learning_rate = 0.0001 #for ANNlearning_rate=1e-4 #for TNNLEARNING_RATE = learning_ratenum_epochs = 100NUM_EPOCHS = num_epochsSAVE_FIGS = FalseSAVE_CHECKPOINTS = FalseFIGURE_DPI = 150THRESHOLD = 0.05SMOOTH_TW_WIDTH = 0.7DEVICE = torch.device("cpu")# Explicit deterministic checkpoint paths (no glob / no auto-pick)ANN_CHECKPOINT = f"{PTH_DIR}BASE_ANN_mnist_lr0.0001_ep100_seed42_20260908.pth"TNN_CHECKPOINT = f"{PTH_DIR}TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260908.pth"R_MIN=1.410360e+09  R_MAX=4.429246e+09 TNN_APM_MODEL = "APM_SINW_SBFET"SEED = 42SEC_PER_DAY = 86400DRIFT_TIMES_SEC = np.array([0, 10, 25, 50, 75, 100], dtype=float)DRIFT_TIMES_DAYS = DRIFT_TIMES_SEC / SEC_PER_DAY#========================================================='''                    ANN TNN LOAD                '''#=========================================================from pathlib import Pathimport sys#from 04_Load_ANN_TNN.py import load_ann , load_tnn_ternary , print_model_summaryMAIN_DIR = Path(MAIN_DIR)if str(MAIN_DIR) not in sys.path:    sys.path.insert(0, str(MAIN_DIR))import importlib_load = importlib.import_module(f"04_Load_ANN_TNN")load_ann = _load.load_annload_tnn_ternary = _load.load_tnn_ternaryprint_model_summary = _load.print_model_summarynet_ann, ann_path, ann_meta = load_ann(ANN_CHECKPOINT)print_model_summary(net_ann, "ANN (full-precision)", ann_path, ann_meta)'''ANN (full-precision)  checkpoint: BASE_ANN_mnist_lr0.0001_ep100_seed42_20260522.pth  parameters: 235,146  saved test accuracy: 98.00%  layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)  '''net_tnn, tnn_path, tnn_meta = load_tnn_ternary(TNN_CHECKPOINT)print_model_summary(net_tnn, "TNN (ternary -1/0/+1)", tnn_path, tnn_meta)'''TNN (ternary -1/0/+1)  checkpoint: TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260522.pth  parameters: 235,146  saved test accuracy: 93.78%  layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)  '''#========================================================='''                  Load Data               '''#=========================================================#Load MNIST Test data (same preprocessing as Base_ANN_TNN / ANN_MNIST)transform = transforms.Compose([    transforms.ToTensor(),    transforms.Normalize((0.1307,), (0.3081,)),    transforms.Lambda(lambda x: x.view(-1))   # flatten 28x28 to 784])test_dataset = datasets.MNIST(    root="./data",    train=False,    download=True,    transform=transform)test_loader = DataLoader(    test_dataset,    batch_size=256,    shuffle=False)#ACcuracy fucntiondef evaluate(model, test_loader, device="cpu"):    model.eval()    correct = 0    total = 0    with torch.no_grad():        for x, y in test_loader:            x = x.to(device)            y = y.to(device)            output = model(x)            pred = output.argmax(dim=1)            correct += (pred == y).sum().item()            total += y.size(0)    return 100 * correct / total# ============================================# TNN + APM_SINW_SBFET — programming error & drift (retention)# ============================================# ============================================================# 0. Basic settings# ============================================================# 1. Build TNN CrossSim parametersdef build_tnn_apm_params(programming_enable=False, drift_enable=False, time=0.0):    p = CrossSimParameters()    # Array size    p.core.rows_max = 1024    p.core.cols_max = 1024    # Balanced TNN core    p.core.style = 1  # BALANCED    p.core.balanced.style = 1  # ONE_SIDED    p.core.balanced.interleaved_posneg = False    p.core.balanced.subtract_current_in_xbar = True    # No bit slicing for TNN    p.core.weight_bits = 0    p.core.bit_sliced.num_slices = 1    # Device range    p.xbar.device.Rmin = R_MIN    p.xbar.device.Rmax = R_MAX    p.xbar.device.cell_bits = 1    p.xbar.device.Vread = 1.0    # Time for drift model    p.xbar.device.time = float(time)    # APM device models    p.xbar.device.programming_error.enable = programming_enable    p.xbar.device.programming_error.model = TNN_APM_MODEL    p.xbar.device.read_noise.enable = False    p.xbar.device.drift_error.enable = drift_enable    p.xbar.device.drift_error.model = TNN_APM_MODEL    # Ideal ADC/DAC    p.xbar.adc.mvm.bits = 0    p.xbar.adc.vmm.bits = 0    p.xbar.dac.mvm.bits = 0    p.xbar.dac.vmm.bits = 0    # No parasitics    p.xbar.array.parasitics.enable = False    p.xbar.array.parasitics.Rp_row = 0    p.xbar.array.parasitics.Rp_col = 0    p.xbar.array.parasitics.Rp_row_terminal = 0    p.xbar.array.parasitics.Rp_col_terminal = 0    p.xbar.array.parasitics.current_from_input = True    p.xbar.array.parasitics.selected_rows = "top"    return p# ============================================================# 2. Evaluation functiondef evaluate(model, test_loader, device="cpu"):    model.eval()    correct = 0    total = 0    with torch.no_grad():        for x, y in test_loader:            x = x.to(device)            y = y.to(device)            out = model(x)            pred = out.argmax(dim=1)            correct += (pred == y).sum().item()            total += y.size(0)    return 100 * correct / total# ============================================================# 3. Helper: collect TNN balanced coresdef collect_tnn_balanced_cores(model):    cores = {}    for name, module in model.named_modules():        core_obj = None        if hasattr(module, "core"):            core_obj = module.core        elif hasattr(module, "analog_core"):            core_obj = module.analog_core        if core_obj is None:            continue        try:            wrapper = core_obj.cores[0][0]            if hasattr(wrapper, "core_pos") and hasattr(wrapper, "core_neg"):                cores[name] = wrapper        except Exception:            pass    return coresdef get_balanced_maps(wrapper_core, scale_rmin):    g_pos = np.array(wrapper_core.core_pos.matrix) / scale_rmin    g_neg = np.array(wrapper_core.core_neg.matrix) / scale_rmin    g_eff = g_pos - g_neg    return g_pos, g_neg, g_eff# ============================================================# 4. Digital baselinedigital_tnn_acc = evaluate(net_tnn, test_loader, device="cpu")print("Digital TNN accuracy:", digital_tnn_acc)print("Convertible modules:")print(convertible_modules(net_tnn))# ============================================================# 5. TNN without programming errorparams_no_prog = build_tnn_apm_params(    programming_enable=False,    drift_enable=False,    time=0.0)np.random.seed(SEED)torch.manual_seed(SEED)analog_tnn_no_prog = from_torch(net_tnn, params_no_prog)analog_tnn_no_prog.eval()acc_no_prog = evaluate(analog_tnn_no_prog, test_loader, device="cpu")# ============================================================# 6. TNN with programming error onlyparams_with_prog = build_tnn_apm_params(    programming_enable=True,    drift_enable=False,    time=0.0)np.random.seed(SEED)torch.manual_seed(SEED)analog_tnn_with_prog = from_torch(net_tnn, params_with_prog)analog_tnn_with_prog.eval()acc_with_prog = evaluate(analog_tnn_with_prog, test_loader, device="cpu")print("\nAccuracy comparison:")print("Digital TNN:", digital_tnn_acc)print("Analog TNN, programming OFF:", acc_no_prog)print("Analog TNN, programming ON:", acc_with_prog)'''Accuracy comparison:Digital TNN: 93.78Analog TNN, programming OFF: 93.78Analog TNN, programming ON: 92.56'''# ============================================================# 7. Programming error accuracy bar plot_COLOR_SONOS = "#2C5282"       # dark blue_COLOR_APM = "#C05621"         # burnt orange_COLOR_DIGITAL_BAR = "#4A5568" # dark graylabels = ["Digital", "Prog OFF", "Prog ON"]accs = [digital_tnn_acc, acc_no_prog, acc_with_prog]bar_colors = [    _COLOR_DIGITAL_BAR,    _COLOR_SONOS,    _COLOR_APM,]fig, ax = plt.subplots(figsize=(7, 4.5), dpi=600)# put grid behind barsax.set_axisbelow(True)# grid firstax.grid(    axis="y",    linestyle="--",    linewidth=0.7,    alpha=0.25,    zorder=0)# bars above gridbars = ax.bar(    labels,    accs,    color=bar_colors,    edgecolor="black",    linewidth=0.8,    width=0.62,    zorder=3)ax.set_ylabel("MNIST Test Accuracy (%)", fontsize=12)ax.set_title(    "TNN Accuracy: Effect of APM_SINW_SBFET Programming Error",    fontsize=10,    pad=12)ax.set_ylim(80, 100)# value labelsfor bar, val in zip(bars, accs):    ax.text(        bar.get_x() + bar.get_width() / 2,        val + 0.18,        f"{val:.2f}%",        ha="center",        va="bottom",        fontsize=10    )# cleaner academic lookax.spines["top"].set_visible(False)ax.spines["right"].set_visible(False)plt.tight_layout()plt.show()# ============================================================# 8. Programming error heatmaps for each layerscale_rmin = params_with_prog.xbar.device.Rmincores_no_prog = collect_tnn_balanced_cores(analog_tnn_no_prog)cores_with_prog = collect_tnn_balanced_cores(analog_tnn_with_prog)print("Layers without programming:")print(list(cores_no_prog.keys()))print("Layers with programming:")print(list(cores_with_prog.keys()))def plot_programming_error_heatmap(layer_name, bc_no_prog, bc_with_prog, scale_rmin):    g_pos_np, g_neg_np, g_eff_np = get_balanced_maps(bc_no_prog, scale_rmin)    g_pos_wp, g_neg_wp, g_eff_wp = get_balanced_maps(bc_with_prog, scale_rmin)    delta_eff = g_eff_wp - g_eff_np    rel_eff = np.abs(delta_eff) / (np.abs(g_eff_np) + 1e-15)    vmax_g = max(np.abs(g_eff_np).max(), np.abs(g_eff_wp).max())    vmax_delta = max(np.percentile(np.abs(delta_eff), 99), 1e-15)    vmax_rel = max(np.percentile(rel_eff, 99), 1e-15)    fig, axes = plt.subplots(1, 4, figsize=(18, 4.2))    im0 = axes[0].imshow(        g_eff_np,        aspect="auto",        cmap="RdBu_r",        vmin=-vmax_g,        vmax=vmax_g    )    axes[0].set_title("Programming OFF\n$G_{eff}$")    plt.colorbar(im0, ax=axes[0])    im1 = axes[1].imshow(        g_eff_wp,        aspect="auto",        cmap="RdBu_r",        vmin=-vmax_g,        vmax=vmax_g    )    axes[1].set_title("Programming ON\n$G_{eff}$")    plt.colorbar(im1, ax=axes[1])    im2 = axes[2].imshow(        delta_eff,        aspect="auto",        cmap="RdBu_r",        vmin=-vmax_delta,        vmax=vmax_delta    )    axes[2].set_title("$\\Delta G_{eff}$\nProg ON - Prog OFF")    plt.colorbar(im2, ax=axes[2])    im3 = axes[3].imshow(        rel_eff,        aspect="auto",        cmap="magma",        vmin=0,        vmax=vmax_rel    )    axes[3].set_title("$|\\Delta G| / |G_{off}|$")    plt.colorbar(im3, ax=axes[3])    for ax in axes:        ax.set_xlabel("Input")        ax.set_ylabel("Output")    plt.suptitle(f"TNN {layer_name}: Programming Error Effect", fontsize=14)    plt.tight_layout()    plt.show()    print(f"\nProgramming error diagnostics — {layer_name}")    print("Mean abs delta:", np.mean(np.abs(delta_eff)))    print("Max abs delta:", np.max(np.abs(delta_eff)))    print("Mean relative delta:", np.mean(rel_eff))    print("Max relative delta:", np.max(rel_eff))    print("-" * 60)for layer_name in cores_no_prog.keys():    if layer_name in cores_with_prog:        plot_programming_error_heatmap(            layer_name,            cores_no_prog[layer_name],            cores_with_prog[layer_name],            scale_rmin        )                                # ============================================================# 9. Drift sweep# Programming error ON, drift ONdrift_models = []drift_accuracies = []for t_sec in DRIFT_TIMES_SEC:    params_drift = build_tnn_apm_params(        programming_enable=True,        drift_enable=True,        time=float(t_sec)    )    # Same seed each time:    # keeps programming-error sampling comparable across time points.    np.random.seed(SEED)    torch.manual_seed(SEED)    analog_tnn_drift = from_torch(net_tnn, params_drift)    analog_tnn_drift.eval()    acc = evaluate(analog_tnn_drift, test_loader, device="cpu")    drift_models.append(analog_tnn_drift)    drift_accuracies.append(acc)drift_accuracies = np.array(drift_accuracies)drift_df = pd.DataFrame({    "Time (seconds)": DRIFT_TIMES_SEC,    "Time (days)": DRIFT_TIMES_DAYS,    "Accuracy (%)": drift_accuracies})#display(drift_df)# ============================================================# 10. Accuracy vs drift timeplt.figure(figsize=(8, 5), dpi=300)plt.plot(    DRIFT_TIMES_SEC,    drift_accuracies,    marker="o",    linewidth=2.2,    markersize=6,    color="#4C3A78")plt.xlabel("Time Since Programming (seconds)", fontsize=11)plt.ylabel("MNIST Test Accuracy (%)", fontsize=11)plt.title(    "TNN Accuracy vs Retention Time",    fontsize=13,    pad=12)# Clean academic styleax = plt.gca()ax.spines["top"].set_visible(False)ax.spines["right"].set_visible(False)ax.grid(    linestyle="--",    linewidth=0.6,    alpha=0.3)# Accuracy labelsfor t, acc in zip(DRIFT_TIMES_SEC, drift_accuracies):    plt.text(        t,        acc + 0.03,        f"{acc:.2f}%",        ha="center",        fontsize=8    )plt.tight_layout()plt.show()# ============================================================# 11. Drift heatmaps for each layer# Reference = t = 0 seconds modelreference_model = drift_models[0]reference_cores = collect_tnn_balanced_cores(reference_model)drift_core_list = [    collect_tnn_balanced_cores(m)    for m in drift_models]def plot_drift_heatmap_for_layer(layer_name, reference_core, time_core, t_sec, t_day, scale_rmin):    g_pos_ref, g_neg_ref, g_eff_ref = get_balanced_maps(reference_core, scale_rmin)    g_pos_t, g_neg_t, g_eff_t = get_balanced_maps(time_core, scale_rmin)    delta_pos = g_pos_t - g_pos_ref    delta_neg = g_neg_t - g_neg_ref    delta_eff = g_eff_t - g_eff_ref    rel_eff = np.abs(delta_eff) / (np.abs(g_eff_ref) + 1e-15)    vmax_g = max(np.abs(g_eff_ref).max(), np.abs(g_eff_t).max())    vmax_delta_eff = max(np.percentile(np.abs(delta_eff), 99), 1e-15)    vmax_delta_pos = max(np.percentile(np.abs(delta_pos), 99), 1e-15)    vmax_delta_neg = max(np.percentile(np.abs(delta_neg), 99), 1e-15)    vmax_rel = max(np.percentile(rel_eff, 99), 1e-15)    fig, axes = plt.subplots(2, 3, figsize=(15, 8))    im0 = axes[0, 0].imshow(        g_eff_t,        aspect="auto",        cmap="RdBu_r",        vmin=-vmax_g,        vmax=vmax_g    )    axes[0, 0].set_title(f"$G_{{eff}}$ at {t_sec:.0f} s")    plt.colorbar(im0, ax=axes[0, 0])    im1 = axes[0, 1].imshow(        delta_eff,        aspect="auto",        cmap="RdBu_r",        vmin=-vmax_delta_eff,        vmax=vmax_delta_eff    )    axes[0, 1].set_title("$\\Delta G_{eff}$ vs 0 s")    plt.colorbar(im1, ax=axes[0, 1])    im2 = axes[0, 2].imshow(        rel_eff,        aspect="auto",        cmap="magma",        vmin=0,        vmax=vmax_rel    )    axes[0, 2].set_title("$|\\Delta G|/|G(0)|$")    plt.colorbar(im2, ax=axes[0, 2])    im3 = axes[1, 0].imshow(        delta_pos,        aspect="auto",        cmap="RdBu_r",        vmin=-vmax_delta_pos,        vmax=vmax_delta_pos    )    axes[1, 0].set_title("$\\Delta G_{pos}$")    plt.colorbar(im3, ax=axes[1, 0])    im4 = axes[1, 1].imshow(        delta_neg,        aspect="auto",        cmap="RdBu_r",        vmin=-vmax_delta_neg,        vmax=vmax_delta_neg    )    axes[1, 1].set_title("$\\Delta G_{neg}$")    plt.colorbar(im4, ax=axes[1, 1])    axes[1, 2].hist(delta_eff.flatten(), bins=80)    axes[1, 2].set_title("$\\Delta G_{eff}$ Distribution")    axes[1, 2].set_xlabel("$\\Delta G_{eff}$")    axes[1, 2].set_ylabel("Count")    axes[1, 2].grid(alpha=0.3)    for ax in axes.flatten():        if ax is not axes[1, 2]:            ax.set_xlabel("Input")            ax.set_ylabel("Output")    plt.suptitle(        f"TNN {layer_name}: Drift Effect\n"        f"t = {t_sec:.0f} s = {t_day:.6f} days",        fontsize=14    )    plt.tight_layout()    plt.show()    print(f"\nDrift diagnostics — {layer_name}, t = {t_sec:.0f} s")    print("Mean abs delta pos:", np.mean(np.abs(delta_pos)))    print("Mean abs delta neg:", np.mean(np.abs(delta_neg)))    print("Mean abs delta eff:", np.mean(np.abs(delta_eff)))    print("Max abs delta eff:", np.max(np.abs(delta_eff)))    print("Mean relative eff:", np.mean(rel_eff))    print("Max relative eff:", np.max(rel_eff))    print("-" * 60)        # ============================================================# 12. Generate drift heatmapsfor layer_name in reference_cores.keys():    for k, t_sec in enumerate(DRIFT_TIMES_SEC):        if t_sec == 0:            continue        current_cores = drift_core_list[k]        if layer_name not in current_cores:            continue        plot_drift_heatmap_for_layer(            layer_name=layer_name,            reference_core=reference_cores[layer_name],            time_core=current_cores[layer_name],            t_sec=t_sec,            t_day=DRIFT_TIMES_DAYS[k],            scale_rmin=scale_rmin        )                # ============================================================# 14. Six-subplot relative drift trend per layerdef plot_6panel_relative_drift_trend_for_layer(    layer_name,    reference_core,    drift_core_list,    drift_times_sec,    drift_times_days,    scale_rmin):    _, _, g_eff_ref = get_balanced_maps(reference_core, scale_rmin)    rel_maps = []    for k, t_sec in enumerate(drift_times_sec):        current_core = drift_core_list[k][layer_name]        _, _, g_eff_t = get_balanced_maps(current_core, scale_rmin)        delta_eff = g_eff_t - g_eff_ref        rel_eff = np.abs(delta_eff) / (np.abs(g_eff_ref) + 1e-15)        rel_maps.append(rel_eff)    vmax_rel = max(np.percentile(rel, 99) for rel in rel_maps)    vmax_rel = max(vmax_rel, 1e-15)    fig, axes = plt.subplots(2, 3, figsize=(16, 8))    axes = axes.flatten()    for k, ax in enumerate(axes):        t_sec = drift_times_sec[k]        t_day = drift_times_days[k]        rel_eff = rel_maps[k]        im = ax.imshow(            rel_eff,            aspect="auto",            cmap="magma",            vmin=0,            vmax=vmax_rel        )        ax.set_title(f"t = {t_sec:.0f} s\n{t_day:.6f} days")        ax.set_xlabel("Input")        ax.set_ylabel("Output")        mean_rel = np.mean(rel_eff)        max_rel = np.max(rel_eff)        ax.text(            0.02,            0.96,            f"mean rel={mean_rel:.2e}\nmax rel={max_rel:.2e}",            transform=ax.transAxes,            va="top",            ha="left",            fontsize=8,            bbox=dict(facecolor="white", alpha=0.75, edgecolor="none")        )    fig.suptitle(        f"TNN {layer_name}: Relative Drift-Induced Weight Change vs t = 0\n"        f"APM_SINW_SBFET, programming error ON + drift ON",        fontsize=14,        y=0.97    )    # Put subplot grid inside this rectangle:    # left, bottom, right, top    fig.subplots_adjust(        left=0.07,        right=0.82,        bottom=0.08,        top=0.86,        wspace=0.35,        hspace=0.45    )    # Colorbar completely outside the 6 subplots    cbar_ax = fig.add_axes([0.86, 0.16, 0.025, 0.62])    cbar = fig.colorbar(im, cax=cbar_ax)    cbar.set_label("$|\\Delta G_{eff}| / |G_{eff}(0)|$")    plt.show()for layer_name in reference_cores.keys():    plot_6panel_relative_drift_trend_for_layer(        layer_name=layer_name,        reference_core=reference_cores[layer_name],        drift_core_list=drift_core_list,        drift_times_sec=DRIFT_TIMES_SEC,        drift_times_days=DRIFT_TIMES_DAYS,        scale_rmin=scale_rmin    )        
+from __future__ import annotations
+
+'''
+In The Name of God
+
+Ali Pilehvar Meibody
+
+Last Update : 07 SEP 2026
+
+
+
+08_Real_TNN_Cross_S.py
+
+
+
+in 06 , first we compared digital ANN with cross-sim ANN in ideal condition and also
+compare digital TNN with cross-sim TNN in ideal codnition to say that everything is 
+perfect and identical and cross-sim is perfect and sync with pytorch.
+
+Then in 07 , we used the data from 05 (device mdoeling) only prorgamming error
+and we consider to compare ANN,TNN sonos and APM to say that APM programming error is 
+logical and liek SONOS (most known one) and then we go to comapre TNN vs ANN
+sytrategy and we decided because of cost and .. and becausse the accuracy not t
+drop too high so we can go for TNN.
+
+
+so here in 08 we decided to go with TNN, HERE WE can investigate exactly
+the effect of APM programmign error on TNN and also Drift of APM on TNN.
+
+
+
+
+'''
+
+
+
+# ============================================
+'''                   Imports              '''
+# ============================================
+
+import os
+import random
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+from datetime import date
+from pathlib import Path
+
+import torch.optim as optim
+
+from pathlib import Path
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn as nn
+
+
+import torch
+import torch.nn as nn
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+import sys
+from pathlib import Path
+from paths import DATA_DIR, PROJECT_DIR, choose_checkpoint, ensure_cross_sim_on_path
+ensure_cross_sim_on_path()
+
+from simulator import CrossSimParameters
+from simulator.parameters.xbar_parameters import ADCRangeLimits
+from simulator.algorithms.dnn.torch.convert import from_torch
+
+from simulator.algorithms.dnn.torch.convert import convertible_modules
+
+import pandas as pd
+
+# ============================================
+'''                Variables              '''
+# ============================================
+SEED = 42  # change this to try other runs; keep fixed for identical results
+
+batch_size = 16
+BATCH_SIZE = batch_size
+
+#learning_rate = 0.0001 #for ANN
+learning_rate=1e-4 #for TNN
+LEARNING_RATE = learning_rate
+
+num_epochs = 100
+NUM_EPOCHS = num_epochs
+
+SAVE_FIGS = False
+SAVE_CHECKPOINTS = False
+
+
+
+
+
+FIGURE_DPI = 150
+THRESHOLD = 0.05
+SMOOTH_TW_WIDTH = 0.7
+DEVICE = torch.device("cpu")
+
+
+
+
+
+# Listed from Pth_Models. Enter keeps the newest file.
+ANN_CHECKPOINT = choose_checkpoint("ann")
+TNN_CHECKPOINT = choose_checkpoint("tnn")
+
+
+
+
+
+R_MIN=1.410360e+09  
+R_MAX=4.429246e+09 
+
+
+
+TNN_APM_MODEL = "APM_SINW_SBFET"
+SEED = 42
+SEC_PER_DAY = 86400
+
+
+DRIFT_TIMES_SEC = np.array([0, 10, 25, 50, 75, 100], dtype=float)
+
+
+
+DRIFT_TIMES_DAYS = DRIFT_TIMES_SEC / SEC_PER_DAY
+
+
+
+#=========================================================
+'''                    ANN TNN LOAD                '''
+#=========================================================
+
+from pathlib import Path
+import sys
+
+import importlib
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
+_load = importlib.import_module("04_Load_ANN_TNN")
+load_ann = _load.load_ann
+load_tnn_ternary = _load.load_tnn_ternary
+print_model_summary = _load.print_model_summary
+
+
+
+
+
+net_ann, ann_path, ann_meta = load_ann(ANN_CHECKPOINT)
+print_model_summary(net_ann, "ANN (full-precision)", ann_path, ann_meta)
+
+'''
+ANN (full-precision)
+  checkpoint: BASE_ANN_mnist_lr0.0001_ep100_seed42_20260522.pth
+  parameters: 235,146
+  saved test accuracy: 98.00%
+  layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)
+  
+'''
+
+net_tnn, tnn_path, tnn_meta = load_tnn_ternary(TNN_CHECKPOINT)
+print_model_summary(net_tnn, "TNN (ternary -1/0/+1)", tnn_path, tnn_meta)
+'''
+TNN (ternary -1/0/+1)
+  checkpoint: TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260522.pth
+  parameters: 235,146
+  saved test accuracy: 93.78%
+  layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)
+  
+'''
+
+
+
+
+#=========================================================
+'''                  Load Data               '''
+#=========================================================
+
+
+#Load MNIST Test data (same preprocessing as Base_ANN_TNN / ANN_MNIST)
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.1307,), (0.3081,)),
+    transforms.Lambda(lambda x: x.view(-1))   # flatten 28x28 to 784
+])
+
+test_dataset = datasets.MNIST(
+    root=str(DATA_DIR),
+    train=False,
+    download=True,
+    transform=transform
+)
+
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=256,
+    shuffle=False
+)
+
+
+
+#ACcuracy fucntion
+def evaluate(model, test_loader, device="cpu"):
+    model.eval()
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for x, y in test_loader:
+            x = x.to(device)
+            y = y.to(device)
+
+            output = model(x)
+            pred = output.argmax(dim=1)
+
+            correct += (pred == y).sum().item()
+            total += y.size(0)
+
+    return 100 * correct / total
+
+
+
+
+
+
+
+
+# ============================================
+# TNN + APM_SINW_SBFET — programming error & drift (retention)
+# ============================================
+
+# ============================================================
+# 0. Basic settings
+
+
+
+# ============================================================
+# 1. Build TNN CrossSim parameters
+
+def build_tnn_apm_params(programming_enable=False, drift_enable=False, time=0.0):
+    p = CrossSimParameters()
+
+    # Array size
+    p.core.rows_max = 1024
+    p.core.cols_max = 1024
+
+    # Balanced TNN core
+    p.core.style = 1  # BALANCED
+    p.core.balanced.style = 1  # ONE_SIDED
+    p.core.balanced.interleaved_posneg = False
+    p.core.balanced.subtract_current_in_xbar = True
+
+    # No bit slicing for TNN
+    p.core.weight_bits = 0
+    p.core.bit_sliced.num_slices = 1
+
+    # Device range
+    p.xbar.device.Rmin = R_MIN
+    p.xbar.device.Rmax = R_MAX
+    p.xbar.device.cell_bits = 1
+    p.xbar.device.Vread = 1.0
+
+    # Time for drift model
+    p.xbar.device.time = float(time)
+
+    # APM device models
+    p.xbar.device.programming_error.enable = programming_enable
+    p.xbar.device.programming_error.model = TNN_APM_MODEL
+
+    p.xbar.device.read_noise.enable = False
+
+    p.xbar.device.drift_error.enable = drift_enable
+    p.xbar.device.drift_error.model = TNN_APM_MODEL
+
+    # Ideal ADC/DAC
+    p.xbar.adc.mvm.bits = 0
+    p.xbar.adc.vmm.bits = 0
+    p.xbar.dac.mvm.bits = 0
+    p.xbar.dac.vmm.bits = 0
+
+    # No parasitics
+    p.xbar.array.parasitics.enable = False
+    p.xbar.array.parasitics.Rp_row = 0
+    p.xbar.array.parasitics.Rp_col = 0
+    p.xbar.array.parasitics.Rp_row_terminal = 0
+    p.xbar.array.parasitics.Rp_col_terminal = 0
+    p.xbar.array.parasitics.current_from_input = True
+    p.xbar.array.parasitics.selected_rows = "top"
+
+    return p
+
+
+# ============================================================
+# 2. Evaluation function
+
+def evaluate(model, test_loader, device="cpu"):
+    model.eval()
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for x, y in test_loader:
+            x = x.to(device)
+            y = y.to(device)
+
+            out = model(x)
+            pred = out.argmax(dim=1)
+
+            correct += (pred == y).sum().item()
+            total += y.size(0)
+
+    return 100 * correct / total
+
+
+
+# ============================================================
+# 3. Helper: collect TNN balanced cores
+
+def collect_tnn_balanced_cores(model):
+    cores = {}
+
+    for name, module in model.named_modules():
+        core_obj = None
+
+        if hasattr(module, "core"):
+            core_obj = module.core
+        elif hasattr(module, "analog_core"):
+            core_obj = module.analog_core
+
+        if core_obj is None:
+            continue
+
+        try:
+            wrapper = core_obj.cores[0][0]
+
+            if hasattr(wrapper, "core_pos") and hasattr(wrapper, "core_neg"):
+                cores[name] = wrapper
+
+        except Exception:
+            pass
+
+    return cores
+
+
+def get_balanced_maps(wrapper_core, scale_rmin):
+    g_pos = np.array(wrapper_core.core_pos.matrix) / scale_rmin
+    g_neg = np.array(wrapper_core.core_neg.matrix) / scale_rmin
+    g_eff = g_pos - g_neg
+
+    return g_pos, g_neg, g_eff
+
+
+
+
+# ============================================================
+# 4. Digital baseline
+
+digital_tnn_acc = evaluate(net_tnn, test_loader, device="cpu")
+
+print("Digital TNN accuracy:", digital_tnn_acc)
+print("Convertible modules:")
+print(convertible_modules(net_tnn))
+
+
+
+
+
+
+# ============================================================
+# 5. TNN without programming error
+
+params_no_prog = build_tnn_apm_params(
+    programming_enable=False,
+    drift_enable=False,
+    time=0.0
+)
+
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+
+analog_tnn_no_prog = from_torch(net_tnn, params_no_prog)
+analog_tnn_no_prog.eval()
+
+acc_no_prog = evaluate(analog_tnn_no_prog, test_loader, device="cpu")
+
+
+# ============================================================
+# 6. TNN with programming error only
+
+params_with_prog = build_tnn_apm_params(
+    programming_enable=True,
+    drift_enable=False,
+    time=0.0
+)
+
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+
+analog_tnn_with_prog = from_torch(net_tnn, params_with_prog)
+analog_tnn_with_prog.eval()
+
+acc_with_prog = evaluate(analog_tnn_with_prog, test_loader, device="cpu")
+
+
+print("\nAccuracy comparison:")
+print("Digital TNN:", digital_tnn_acc)
+print("Analog TNN, programming OFF:", acc_no_prog)
+print("Analog TNN, programming ON:", acc_with_prog)
+
+
+'''
+Accuracy comparison:
+Digital TNN: 93.78
+Analog TNN, programming OFF: 93.78
+Analog TNN, programming ON: 92.56
+'''
+
+
+
+
+
+# ============================================================
+# 7. Programming error accuracy bar plot
+
+
+_COLOR_SONOS = "#2C5282"       # dark blue
+_COLOR_APM = "#C05621"         # burnt orange
+_COLOR_DIGITAL_BAR = "#4A5568" # dark gray
+
+labels = ["Digital", "Prog OFF", "Prog ON"]
+accs = [digital_tnn_acc, acc_no_prog, acc_with_prog]
+
+bar_colors = [
+    _COLOR_DIGITAL_BAR,
+    _COLOR_SONOS,
+    _COLOR_APM,
+]
+
+fig, ax = plt.subplots(figsize=(7, 4.5), dpi=600)
+
+# put grid behind bars
+ax.set_axisbelow(True)
+
+# grid first
+ax.grid(
+    axis="y",
+    linestyle="--",
+    linewidth=0.7,
+    alpha=0.25,
+    zorder=0
+)
+
+# bars above grid
+bars = ax.bar(
+    labels,
+    accs,
+    color=bar_colors,
+    edgecolor="black",
+    linewidth=0.8,
+    width=0.62,
+    zorder=3
+)
+
+ax.set_ylabel("MNIST Test Accuracy (%)", fontsize=12)
+
+ax.set_title(
+    "TNN Accuracy: Effect of APM_SINW_SBFET Programming Error",
+    fontsize=10,
+    pad=12
+)
+
+ax.set_ylim(80, 100)
+
+# value labels
+for bar, val in zip(bars, accs):
+    ax.text(
+        bar.get_x() + bar.get_width() / 2,
+        val + 0.18,
+        f"{val:.2f}%",
+        ha="center",
+        va="bottom",
+        fontsize=10
+    )
+
+# cleaner academic look
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+plt.tight_layout()
+plt.show()
+
+
+
+# ============================================================
+# 8. Programming error heatmaps for each layer
+
+scale_rmin = params_with_prog.xbar.device.Rmin
+
+cores_no_prog = collect_tnn_balanced_cores(analog_tnn_no_prog)
+cores_with_prog = collect_tnn_balanced_cores(analog_tnn_with_prog)
+
+print("Layers without programming:")
+print(list(cores_no_prog.keys()))
+
+print("Layers with programming:")
+print(list(cores_with_prog.keys()))
+
+
+
+def plot_programming_error_heatmap(layer_name, bc_no_prog, bc_with_prog, scale_rmin):
+    g_pos_np, g_neg_np, g_eff_np = get_balanced_maps(bc_no_prog, scale_rmin)
+    g_pos_wp, g_neg_wp, g_eff_wp = get_balanced_maps(bc_with_prog, scale_rmin)
+
+    delta_eff = g_eff_wp - g_eff_np
+    rel_eff = np.abs(delta_eff) / (np.abs(g_eff_np) + 1e-15)
+
+    vmax_g = max(np.abs(g_eff_np).max(), np.abs(g_eff_wp).max())
+    vmax_delta = max(np.percentile(np.abs(delta_eff), 99), 1e-15)
+    vmax_rel = max(np.percentile(rel_eff, 99), 1e-15)
+
+    fig, axes = plt.subplots(1, 4, figsize=(18, 4.2))
+
+    im0 = axes[0].imshow(
+        g_eff_np,
+        aspect="auto",
+        cmap="RdBu_r",
+        vmin=-vmax_g,
+        vmax=vmax_g
+    )
+    axes[0].set_title("Programming OFF\n$G_{eff}$")
+    plt.colorbar(im0, ax=axes[0])
+
+    im1 = axes[1].imshow(
+        g_eff_wp,
+        aspect="auto",
+        cmap="RdBu_r",
+        vmin=-vmax_g,
+        vmax=vmax_g
+    )
+    axes[1].set_title("Programming ON\n$G_{eff}$")
+    plt.colorbar(im1, ax=axes[1])
+
+    im2 = axes[2].imshow(
+        delta_eff,
+        aspect="auto",
+        cmap="RdBu_r",
+        vmin=-vmax_delta,
+        vmax=vmax_delta
+    )
+    axes[2].set_title("$\\Delta G_{eff}$\nProg ON - Prog OFF")
+    plt.colorbar(im2, ax=axes[2])
+
+    im3 = axes[3].imshow(
+        rel_eff,
+        aspect="auto",
+        cmap="magma",
+        vmin=0,
+        vmax=vmax_rel
+    )
+    axes[3].set_title("$|\\Delta G| / |G_{off}|$")
+    plt.colorbar(im3, ax=axes[3])
+
+    for ax in axes:
+        ax.set_xlabel("Input")
+        ax.set_ylabel("Output")
+
+    plt.suptitle(f"TNN {layer_name}: Programming Error Effect", fontsize=14)
+    plt.tight_layout()
+    plt.show()
+
+    print(f"\nProgramming error diagnostics — {layer_name}")
+    print("Mean abs delta:", np.mean(np.abs(delta_eff)))
+    print("Max abs delta:", np.max(np.abs(delta_eff)))
+    print("Mean relative delta:", np.mean(rel_eff))
+    print("Max relative delta:", np.max(rel_eff))
+    print("-" * 60)
+
+
+for layer_name in cores_no_prog.keys():
+    if layer_name in cores_with_prog:
+        plot_programming_error_heatmap(
+            layer_name,
+            cores_no_prog[layer_name],
+            cores_with_prog[layer_name],
+            scale_rmin
+        )
+        
+        
+        
+        
+# ============================================================
+# 9. Drift sweep
+# Programming error ON, drift ON
+
+drift_models = []
+drift_accuracies = []
+
+for t_sec in DRIFT_TIMES_SEC:
+    params_drift = build_tnn_apm_params(
+        programming_enable=True,
+        drift_enable=True,
+        time=float(t_sec)
+    )
+
+    # Same seed each time:
+    # keeps programming-error sampling comparable across time points.
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
+
+    analog_tnn_drift = from_torch(net_tnn, params_drift)
+    analog_tnn_drift.eval()
+
+    acc = evaluate(analog_tnn_drift, test_loader, device="cpu")
+
+    drift_models.append(analog_tnn_drift)
+    drift_accuracies.append(acc)
+
+drift_accuracies = np.array(drift_accuracies)
+
+drift_df = pd.DataFrame({
+    "Time (seconds)": DRIFT_TIMES_SEC,
+    "Time (days)": DRIFT_TIMES_DAYS,
+    "Accuracy (%)": drift_accuracies
+})
+
+#display(drift_df)
+
+
+
+# ============================================================
+# 10. Accuracy vs drift time
+plt.figure(figsize=(8, 5), dpi=300)
+
+plt.plot(
+    DRIFT_TIMES_SEC,
+    drift_accuracies,
+    marker="o",
+    linewidth=2.2,
+    markersize=6,
+    color="#4C3A78"
+)
+
+plt.xlabel("Time Since Programming (seconds)", fontsize=11)
+plt.ylabel("MNIST Test Accuracy (%)", fontsize=11)
+
+plt.title(
+    "TNN Accuracy vs Retention Time",
+    fontsize=13,
+    pad=12
+)
+
+# Clean academic style
+ax = plt.gca()
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(
+    linestyle="--",
+    linewidth=0.6,
+    alpha=0.3
+)
+
+# Accuracy labels
+for t, acc in zip(DRIFT_TIMES_SEC, drift_accuracies):
+    plt.text(
+        t,
+        acc + 0.03,
+        f"{acc:.2f}%",
+        ha="center",
+        fontsize=8
+    )
+
+plt.tight_layout()
+
+plt.show()
+
+# ============================================================
+# 11. Drift heatmaps for each layer
+# Reference = t = 0 seconds model
+
+reference_model = drift_models[0]
+reference_cores = collect_tnn_balanced_cores(reference_model)
+
+drift_core_list = [
+    collect_tnn_balanced_cores(m)
+    for m in drift_models
+]
+def plot_drift_heatmap_for_layer(layer_name, reference_core, time_core, t_sec, t_day, scale_rmin):
+    g_pos_ref, g_neg_ref, g_eff_ref = get_balanced_maps(reference_core, scale_rmin)
+    g_pos_t, g_neg_t, g_eff_t = get_balanced_maps(time_core, scale_rmin)
+
+    delta_pos = g_pos_t - g_pos_ref
+    delta_neg = g_neg_t - g_neg_ref
+    delta_eff = g_eff_t - g_eff_ref
+
+    rel_eff = np.abs(delta_eff) / (np.abs(g_eff_ref) + 1e-15)
+
+    vmax_g = max(np.abs(g_eff_ref).max(), np.abs(g_eff_t).max())
+    vmax_delta_eff = max(np.percentile(np.abs(delta_eff), 99), 1e-15)
+    vmax_delta_pos = max(np.percentile(np.abs(delta_pos), 99), 1e-15)
+    vmax_delta_neg = max(np.percentile(np.abs(delta_neg), 99), 1e-15)
+    vmax_rel = max(np.percentile(rel_eff, 99), 1e-15)
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+
+    im0 = axes[0, 0].imshow(
+        g_eff_t,
+        aspect="auto",
+        cmap="RdBu_r",
+        vmin=-vmax_g,
+        vmax=vmax_g
+    )
+    axes[0, 0].set_title(f"$G_{{eff}}$ at {t_sec:.0f} s")
+    plt.colorbar(im0, ax=axes[0, 0])
+
+    im1 = axes[0, 1].imshow(
+        delta_eff,
+        aspect="auto",
+        cmap="RdBu_r",
+        vmin=-vmax_delta_eff,
+        vmax=vmax_delta_eff
+    )
+    axes[0, 1].set_title("$\\Delta G_{eff}$ vs 0 s")
+    plt.colorbar(im1, ax=axes[0, 1])
+
+    im2 = axes[0, 2].imshow(
+        rel_eff,
+        aspect="auto",
+        cmap="magma",
+        vmin=0,
+        vmax=vmax_rel
+    )
+    axes[0, 2].set_title("$|\\Delta G|/|G(0)|$")
+    plt.colorbar(im2, ax=axes[0, 2])
+
+    im3 = axes[1, 0].imshow(
+        delta_pos,
+        aspect="auto",
+        cmap="RdBu_r",
+        vmin=-vmax_delta_pos,
+        vmax=vmax_delta_pos
+    )
+    axes[1, 0].set_title("$\\Delta G_{pos}$")
+    plt.colorbar(im3, ax=axes[1, 0])
+
+    im4 = axes[1, 1].imshow(
+        delta_neg,
+        aspect="auto",
+        cmap="RdBu_r",
+        vmin=-vmax_delta_neg,
+        vmax=vmax_delta_neg
+    )
+    axes[1, 1].set_title("$\\Delta G_{neg}$")
+    plt.colorbar(im4, ax=axes[1, 1])
+
+    axes[1, 2].hist(delta_eff.flatten(), bins=80)
+    axes[1, 2].set_title("$\\Delta G_{eff}$ Distribution")
+    axes[1, 2].set_xlabel("$\\Delta G_{eff}$")
+    axes[1, 2].set_ylabel("Count")
+    axes[1, 2].grid(alpha=0.3)
+
+    for ax in axes.flatten():
+        if ax is not axes[1, 2]:
+            ax.set_xlabel("Input")
+            ax.set_ylabel("Output")
+
+    plt.suptitle(
+        f"TNN {layer_name}: Drift Effect\n"
+        f"t = {t_sec:.0f} s = {t_day:.6f} days",
+        fontsize=14
+    )
+
+    plt.tight_layout()
+    plt.show()
+
+    print(f"\nDrift diagnostics — {layer_name}, t = {t_sec:.0f} s")
+    print("Mean abs delta pos:", np.mean(np.abs(delta_pos)))
+    print("Mean abs delta neg:", np.mean(np.abs(delta_neg)))
+    print("Mean abs delta eff:", np.mean(np.abs(delta_eff)))
+    print("Max abs delta eff:", np.max(np.abs(delta_eff)))
+    print("Mean relative eff:", np.mean(rel_eff))
+    print("Max relative eff:", np.max(rel_eff))
+    print("-" * 60)
+    
+    
+
+# ============================================================
+# 12. Generate drift heatmaps
+
+for layer_name in reference_cores.keys():
+    for k, t_sec in enumerate(DRIFT_TIMES_SEC):
+        if t_sec == 0:
+            continue
+
+        current_cores = drift_core_list[k]
+
+        if layer_name not in current_cores:
+            continue
+
+        plot_drift_heatmap_for_layer(
+            layer_name=layer_name,
+            reference_core=reference_cores[layer_name],
+            time_core=current_cores[layer_name],
+            t_sec=t_sec,
+            t_day=DRIFT_TIMES_DAYS[k],
+            scale_rmin=scale_rmin
+        )
+        
+        
+
+
+# ============================================================
+# 14. Six-subplot relative drift trend per layer
+def plot_6panel_relative_drift_trend_for_layer(
+    layer_name,
+    reference_core,
+    drift_core_list,
+    drift_times_sec,
+    drift_times_days,
+    scale_rmin
+):
+    _, _, g_eff_ref = get_balanced_maps(reference_core, scale_rmin)
+
+    rel_maps = []
+
+    for k, t_sec in enumerate(drift_times_sec):
+        current_core = drift_core_list[k][layer_name]
+        _, _, g_eff_t = get_balanced_maps(current_core, scale_rmin)
+
+        delta_eff = g_eff_t - g_eff_ref
+        rel_eff = np.abs(delta_eff) / (np.abs(g_eff_ref) + 1e-15)
+
+        rel_maps.append(rel_eff)
+
+    vmax_rel = max(np.percentile(rel, 99) for rel in rel_maps)
+    vmax_rel = max(vmax_rel, 1e-15)
+
+    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+    axes = axes.flatten()
+
+    for k, ax in enumerate(axes):
+        t_sec = drift_times_sec[k]
+        t_day = drift_times_days[k]
+        rel_eff = rel_maps[k]
+
+        im = ax.imshow(
+            rel_eff,
+            aspect="auto",
+            cmap="magma",
+            vmin=0,
+            vmax=vmax_rel
+        )
+
+        ax.set_title(f"t = {t_sec:.0f} s\n{t_day:.6f} days")
+        ax.set_xlabel("Input")
+        ax.set_ylabel("Output")
+
+        mean_rel = np.mean(rel_eff)
+        max_rel = np.max(rel_eff)
+
+        ax.text(
+            0.02,
+            0.96,
+            f"mean rel={mean_rel:.2e}\nmax rel={max_rel:.2e}",
+            transform=ax.transAxes,
+            va="top",
+            ha="left",
+            fontsize=8,
+            bbox=dict(facecolor="white", alpha=0.75, edgecolor="none")
+        )
+
+    fig.suptitle(
+        f"TNN {layer_name}: Relative Drift-Induced Weight Change vs t = 0\n"
+        f"APM_SINW_SBFET, programming error ON + drift ON",
+        fontsize=14,
+        y=0.97
+    )
+
+    # Put subplot grid inside this rectangle:
+    # left, bottom, right, top
+    fig.subplots_adjust(
+        left=0.07,
+        right=0.82,
+        bottom=0.08,
+        top=0.86,
+        wspace=0.35,
+        hspace=0.45
+    )
+
+    # Colorbar completely outside the 6 subplots
+    cbar_ax = fig.add_axes([0.86, 0.16, 0.025, 0.62])
+
+    cbar = fig.colorbar(im, cax=cbar_ax)
+    cbar.set_label("$|\\Delta G_{eff}| / |G_{eff}(0)|$")
+
+    plt.show()
+
+
+for layer_name in reference_cores.keys():
+    plot_6panel_relative_drift_trend_for_layer(
+        layer_name=layer_name,
+        reference_core=reference_cores[layer_name],
+        drift_core_list=drift_core_list,
+        drift_times_sec=DRIFT_TIMES_SEC,
+        drift_times_days=DRIFT_TIMES_DAYS,
+        scale_rmin=scale_rmin
+    )
+    
+    
+

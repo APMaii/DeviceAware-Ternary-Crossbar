@@ -1,1 +1,631 @@
-'''In The Name of GodAli Pilehvar MeibodyLast Update : 07 sep 202604_Load_ANN_TNN.pyIn 03 we trained the optimal ANN, TNN, Inference TNN which finally we got some .pth files , here we just load again these models and we got some plots to be sureand also others can used this to load Here we have ANN.pth that we get the weigths and then we mount on the ANN structruealso for ternary we again load from TNN.pth and again we mount on TNN .so we are sure that this is our weightsNotes for later:    later we must have one file for Neural Network architectures and make_loaders    '''# ============================================'''                   Imports              '''# ============================================import osimport randomimport numpy as npimport torchimport torch.nn as nnimport torch.nn.functional as Ffrom torchvision import datasets, transformsfrom torch.utils.data import DataLoaderimport matplotlib.pyplot as pltfrom datetime import datefrom pathlib import Pathimport torch.optim as optimfrom pathlib import Pathimport matplotlib.pyplot as pltimport numpy as npimport torchimport torch.nn as nn# ============================================'''                Variables              '''# ============================================SEED = 42  # change this to try other runs; keep fixed for identical resultsbatch_size = 16BATCH_SIZE = batch_size#learning_rate = 0.0001 #for ANNlearning_rate=1e-4 #for TNNLEARNING_RATE = learning_ratenum_epochs = 100NUM_EPOCHS = num_epochsSAVE_FIGS = FalseSAVE_CHECKPOINTS = FalsePTH_DIR= '/Users/apm/Desktop/tern-net/Pth_Models/'FIGURE_DPI = 150THRESHOLD = 0.05SMOOTH_TW_WIDTH = 0.7DEVICE = torch.device("cpu")# Explicit deterministic checkpoint paths (no glob / no auto-pick)ANN_CHECKPOINT = f"{PTH_DIR}BASE_ANN_mnist_lr0.0001_ep100_seed42_20260908.pth"TNN_CHECKPOINT = f"{PTH_DIR}TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260908.pth"# ============================================# Model (same as ANN_MNIST / first_Cross_Sim / Base_ANN_TNN)# ============================================class ANN(nn.Module):    def __init__(self):        super().__init__()        self.fc1 = nn.Linear(784, 256)        self.fc2 = nn.Linear(256, 128)        self.fc3 = nn.Linear(128, 10)        self.relu = nn.ReLU()    def forward(self, x):        x = x.view(x.size(0), -1)        x = self.relu(self.fc1(x))        x = self.relu(self.fc2(x))        return self.fc3(x)# ============================================# Load helpers# ============================================def _load_torch_file(path: Path, device=DEVICE):    try:        return torch.load(path, map_location=device, weights_only=False)    except TypeError:        return torch.load(path, map_location=device)def _extract_state_dict(ckpt) -> dict:    if isinstance(ckpt, dict) and "state_dict" in ckpt:        return ckpt["state_dict"]    if isinstance(ckpt, dict) and all(k.startswith("fc") for k in ckpt):        return ckpt    raise ValueError(        "Checkpoint format not recognized. Expected dict with 'state_dict' "        "or raw state_dict keys (fc1.weight, ...)."    )def _require_checkpoint(path: Path) -> Path:    path = Path(path)    if not path.is_file():        raise FileNotFoundError(f"Missing checkpoint: {path}")    return pathdef _load_from_checkpoint(path: Path, device, verify_ternary: bool = False) -> tuple[ANN, dict]:    path = _require_checkpoint(path)    ckpt = _load_torch_file(path, device)    state = _extract_state_dict(ckpt)    model = ANN().to(device)    model.load_state_dict(state)    model.eval()    if verify_ternary:        _verify_ternary_weights(model, path.name)    meta = ckpt if isinstance(ckpt, dict) else {}    return model, metadef load_ann(    checkpoint: Path | str = ANN_CHECKPOINT,    device: torch.device | str = DEVICE,) -> tuple[ANN, Path, dict]:    """Load baseline ANN (full-precision weights)."""    path = _require_checkpoint(checkpoint)    model, meta = _load_from_checkpoint(path, device, verify_ternary=False)    return model, path, metadef load_tnn_ternary(    checkpoint: Path | str = TNN_CHECKPOINT,    device: torch.device | str = DEVICE,) -> tuple[ANN, Path, dict]:    """Load ternary-only TNN ({-1, 0, +1} weights) for inference / CrossSim."""    path = _require_checkpoint(checkpoint)    model, meta = _load_from_checkpoint(path, device, verify_ternary=True)    return model, path, metadef _verify_ternary_weights(model: ANN, label: str) -> None:    allowed = {-1.0, 0.0, 1.0}    for name in ("fc1", "fc2", "fc3"):        w = getattr(model, name).weight.detach()        uniq = set(torch.unique(w).tolist())        if not uniq.issubset(allowed):            raise ValueError(f"{label}: {name}.weight has non-ternary values: {sorted(uniq)}")def collect_layer_info(model: ANN) -> list[dict]:    """Extract weight/bias arrays per Linear layer."""    layer_info = []    for name in ("fc1", "fc2", "fc3"):        layer = getattr(model, name)        w = layer.weight.detach().cpu().numpy()        b = layer.bias.detach().cpu().numpy()        layer_info.append({            "name": name,            "weight": w,            "bias": b,            "weight_shape": w.shape,        })    return layer_infodef _print_weight_stats(layer_info: list[dict], model_label: str, is_ternary: bool) -> None:    print(f"\n{model_label} — weight statistics")    print("-" * 50)    for li in layer_info:        w = li["weight"]        uniq = np.unique(w)        print(f"  {li['name']} shape={li['weight_shape']}")        if is_ternary:            for v in (-1.0, 0.0, 1.0):                n = (w == v).sum()                print(f"    {v:+.0f}: {n:,} ({100 * n / w.size:.2f}%)")        else:            print(f"    unique values: {uniq.size:,}")            print(f"    mean={w.mean():+.6f}  std={w.std():.6f}  "                  f"min={w.min():+.6f}  max={w.max():+.6f}")def plot_loaded_weights(model: ANN, prefix: str, title_tag: str, is_ternary: bool = False) -> None:    """    Per-layer histograms, heatmaps, and fc1 filters for a loaded net_ann or net_tnn.    Saves figures under figures/cross_sim2_loaded_weights/.    """    layer_info = collect_layer_info(model)    _print_weight_stats(layer_info, title_tag, is_ternary)    n_layers = len(layer_info)    names = [li["name"] for li in layer_info]    ternary_bins = [-1.5, -0.5, 0.5, 1.5]    # 1) Per-layer weight & bias histograms    fig, axes = plt.subplots(n_layers, 2, figsize=(12, 4 * n_layers))    if n_layers == 1:        axes = np.array([axes])    for row, li in enumerate(layer_info):        w, b = li["weight"].ravel(), li["bias"].ravel()        if is_ternary:            axes[row, 0].hist(                w, bins=ternary_bins, color="seagreen", edgecolor="black",                alpha=0.9, align="mid",            )            axes[row, 0].set_xticks([-1, 0, 1])        else:            axes[row, 0].hist(w, bins=80, color="steelblue", edgecolor="white", alpha=0.85)            axes[row, 0].axvline(0, color="red", linestyle="--", linewidth=1, label="zero")        axes[row, 0].set_title(f"{li['name']} — weights (n={len(w):,})")        axes[row, 0].set_xlabel("weight value")        axes[row, 0].set_ylabel("count")        if not is_ternary:            axes[row, 0].legend()        axes[row, 1].hist(b, bins=40, color="darkorange", edgecolor="white", alpha=0.85)        axes[row, 1].axvline(0, color="red", linestyle="--", linewidth=1, label="zero")        axes[row, 1].set_title(f"{li['name']} — biases (n={len(b):,})")        axes[row, 1].set_xlabel("bias value")        axes[row, 1].legend()    plt.suptitle(f"{title_tag} — per-layer distributions", fontsize=13, y=1.01)    plt.tight_layout()    if SAVE_FIGS:       p = f"{prefix}_layer_distributions.png"       plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")       print(f"Saved: {p}")    plt.show()            plt.close()    # 2) Ternary composition bar chart (TNN only) or |weight| bars (ANN)    fig2, ax2 = plt.subplots(figsize=(8, 4))    x = np.arange(len(names))    if is_ternary:        width = 0.25        neg = [(li["weight"] == -1).mean() * 100 for li in layer_info]        zero = [(li["weight"] == 0).mean() * 100 for li in layer_info]        pos = [(li["weight"] == 1).mean() * 100 for li in layer_info]        ax2.bar(x - width, neg, width, label="-1", color="#0C5DA5")        ax2.bar(x, zero, width, label="0", color="#888888")        ax2.bar(x + width, pos, width, label="+1", color="#1B7F3B")        ax2.set_ylabel("% of weights")        ax2.set_title(f"{title_tag} — ternary composition per layer")        ax2.legend()    else:        mean_abs = [np.abs(li["weight"]).mean() for li in layer_info]        ax2.bar(names, mean_abs, color="steelblue", edgecolor="black")        ax2.set_ylabel("mean |weight|")        ax2.set_title(f"{title_tag} — mean |weight| per layer")    ax2.set_xticks(x)    ax2.set_xticklabels(names)    ax2.grid(True, axis="y", alpha=0.3)    plt.tight_layout()    if SAVE_FIGS:        p =f"{prefix}_composition_or_magnitude.png"        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")        print(f"Saved: {p}")            plt.show()    plt.close()    # 3) Heatmaps: fc3 full + fc1 first 32 neurons    fig3, axes3 = plt.subplots(1, 2, figsize=(14, 5))    w3 = layer_info[-1]["weight"]    if is_ternary:        vmin, vmax, ticks = -1, 1, [-1, 0, 1]    else:        p99 = np.percentile(np.abs(w3), 99)        vmin, vmax, ticks = -p99, p99, None    im0 = axes3[0].imshow(w3, aspect="auto", cmap="RdBu_r", vmin=vmin, vmax=vmax)    axes3[0].set_title(f"fc3 weights {w3.shape[0]}×{w3.shape[1]}")    axes3[0].set_xlabel("input (hidden2)")    axes3[0].set_ylabel("class 0–9")    cbar0 = plt.colorbar(im0, ax=axes3[0], fraction=0.046)    if ticks is not None:        cbar0.set_ticks(ticks)    w1 = layer_info[0]["weight"][:32, :]    if is_ternary:        vmin1, vmax1 = -1, 1    else:        p99_1 = np.percentile(np.abs(w1), 99)        vmin1, vmax1 = -p99_1, p99_1    im1 = axes3[1].imshow(w1, aspect="auto", cmap="RdBu_r", vmin=vmin1, vmax=vmax1)    axes3[1].set_title("fc1 — first 32 neurons × 784 pixels")    axes3[1].set_xlabel("pixel index")    axes3[1].set_ylabel("neuron")    plt.colorbar(im1, ax=axes3[1], fraction=0.046)    plt.suptitle(f"{title_tag} — weight heatmaps (fc3 + fc1 subset)", fontsize=12)    plt.tight_layout()    if SAVE_FIGS:        p = f"{prefix}_weight_heatmaps.png"        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")        print(f"Saved: {p}")            plt.show()    plt.close()    # 4) All three layer weight matrices    fig4, axes4 = plt.subplots(1, 3, figsize=(15, 4))    for ax, li in zip(axes4, layer_info):        w = li["weight"]        if is_ternary:            kw = dict(vmin=-1, vmax=1)        else:            p99 = np.percentile(np.abs(w), 99)            kw = dict(vmin=-p99, vmax=p99)        im = ax.imshow(w, aspect="auto", cmap="RdBu_r", **kw)        ax.set_title(f"{li['name']} {w.shape[0]}×{w.shape[1]}")        plt.colorbar(im, ax=ax, fraction=0.046)    plt.suptitle(f"{title_tag} — all layer weight matrices", fontsize=12)    plt.tight_layout()    if SAVE_FIGS:        p = f"{prefix}_all_layer_heatmaps.png"        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")        print(f"Saved: {p}")    plt.show()    plt.close()    # 5) fc1 input filters (first 16 neurons as 28×28)    fig5, axes5 = plt.subplots(4, 4, figsize=(8, 8))    w1_full = layer_info[0]["weight"]    for i, ax in enumerate(axes5.ravel()):        filt = w1_full[i].reshape(28, 28)        if is_ternary:            ax.imshow(filt, cmap="RdBu_r", vmin=-1, vmax=1)        else:            ax.imshow(filt, cmap="RdBu_r")        ax.set_title(f"neuron {i}", fontsize=8)        ax.axis("off")    plt.suptitle(f"{title_tag} — fc1 first 16 input filters (28×28)", fontsize=12)    plt.tight_layout()        if SAVE_FIGS:        p = f"{prefix}_fc1_filters.png"        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")        print(f"Saved: {p}")    plt.show()    plt.close()        # 6) Strongest fc1 filters (highest L1 norm)    w1_full = layer_info[0]["weight"]        # importance of each neuron    scores = np.sum(np.abs(w1_full), axis=1)        # top 16 strongest neurons    top_idx = np.argsort(scores)[-16:][::-1]        fig6, axes6 = plt.subplots(4, 4, figsize=(8, 8))        for ax, idx in zip(axes6.ravel(), top_idx):        filt = w1_full[idx].reshape(28, 28)            if is_ternary:            ax.imshow(filt, cmap="RdBu_r", vmin=-1, vmax=1)        else:            ax.imshow(filt, cmap="RdBu_r")            ax.set_title(f"Neuron {idx}", fontsize=8)        ax.axis("off")        plt.suptitle(        f"{title_tag} — strongest fc1 filters",        fontsize=12    )        plt.tight_layout()        if SAVE_FIGS:        p = f"{prefix}_strongest_fc1_filters.png"        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")        plt.show()    plt.close()            # 7) Sparsity / active connection map    fig7, ax7 = plt.subplots(figsize=(10, 6))        if is_ternary:        active_map = (w1_full != 0).astype(float)            im = ax7.imshow(            active_map,            aspect="auto",            cmap="gray_r"        )            ax7.set_title(            f"{title_tag} — active vs zero connections (fc1)"        )            ax7.set_xlabel("Input pixel")        ax7.set_ylabel("Neuron")            plt.colorbar(im, ax=ax7, fraction=0.046)            plt.tight_layout()            if SAVE_FIGS:            p = f"{prefix}_fc1_sparsity_map.png"            plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")            plt.show()        plt.close()            # 8) Positive / Negative / Zero decomposition    if is_ternary:            neuron_idx = top_idx[0]            filt = w1_full[neuron_idx].reshape(28, 28)            pos = (filt == 1).astype(float)        neg = (filt == -1).astype(float)        zero = (filt == 0).astype(float)            fig8, axes8 = plt.subplots(1, 3, figsize=(10, 3))            axes8[0].imshow(pos, cmap="Reds")        axes8[0].set_title("+1 positions")        axes8[0].axis("off")            axes8[1].imshow(neg, cmap="Blues")        axes8[1].set_title("-1 positions")        axes8[1].axis("off")            axes8[2].imshow(zero, cmap="Greys")        axes8[2].set_title("0 positions")        axes8[2].axis("off")            plt.suptitle(            f"{title_tag} — ternary decomposition of neuron {neuron_idx}",            fontsize=12        )            plt.tight_layout()            if SAVE_FIGS:            p = f"{prefix}_ternary_decomposition.png"            plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")            plt.show()        plt.close()def print_model_summary(model: ANN, name: str, ckpt_path: Path, meta: dict) -> None:    n_params = sum(p.numel() for p in model.parameters())    acc = meta.get("test_accuracy")    acc_str = f"{acc:.2f}%" if acc is not None else "n/a"    print(f"\n{name}")    print(f"  checkpoint: {ckpt_path.name}")    print(f"  parameters: {n_params:,}")    print(f"  saved test accuracy: {acc_str}")    print(f"  layers: fc1 {tuple(model.fc1.weight.shape)}, "          f"fc2 {tuple(model.fc2.weight.shape)}, fc3 {tuple(model.fc3.weight.shape)}")if __name__ == "__main__":        # ============================================    # Load both networks (import / %run executes this)    # ============================================    print("=" * 60)    print("Cross-sim2 — load ANN & TNN (explicit checkpoints)")    print("=" * 60)        net_ann, ann_path, ann_meta = load_ann(ANN_CHECKPOINT)        print_model_summary(net_ann, "ANN (full-precision)", ann_path, ann_meta)        '''    ANN (full-precision)      checkpoint: BASE_ANN_mnist_lr0.0001_ep100_seed42_20260522.pth      parameters: 235,146      saved test accuracy: 98.00%      layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)                              #also we check for 24 may                      ANN (full-precision)      checkpoint: BASE_ANN_mnist_lr0.0001_ep100_seed42_20260525.pth      parameters: 235,146      saved test accuracy: 98.00%      layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)          '''            net_tnn, tnn_path, tnn_meta = load_tnn_ternary(TNN_CHECKPOINT)        print_model_summary(net_tnn, "TNN (ternary -1/0/+1)", tnn_path, tnn_meta)        '''    TNN (ternary -1/0/+1)      checkpoint: TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260522.pth      parameters: 235,146      saved test accuracy: 93.78%      layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)          TNN (ternary -1/0/+1)      checkpoint: TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260525.pth      parameters: 235,146      saved test accuracy: 93.78%      layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)          '''        # ============================================    # Weight distributions & heatmaps (both models)    # ============================================    print("\n" + "=" * 60)    print("Plotting loaded weight distributions & heatmaps")    print("=" * 60)        #plot_loaded_weights(net_ann, "ann", "ANN (full-precision)", is_ternary=False)        '''    Loaded ANN (full-precision) — weight statistics    --------------------------------------------------      fc1 shape=(256, 784)        unique values: 200,477        mean=+0.001846  std=0.054868  min=-0.505663  max=+0.305334      fc2 shape=(128, 256)        unique values: 32,757        mean=+0.009993  std=0.094967  min=-0.481511  max=+0.567566      fc3 shape=(10, 128)        unique values: 1,280        mean=-0.049514  std=0.170451  min=-0.552233  max=+0.453748                            24 MAY check reproducibility    ANN (full-precision) — weight statistics    --------------------------------------------------      fc1 shape=(256, 784)        unique values: 200,477        mean=+0.001846  std=0.054868  min=-0.505663  max=+0.305334      fc2 shape=(128, 256)        unique values: 32,757        mean=+0.009993  std=0.094967  min=-0.481511  max=+0.567566      fc3 shape=(10, 128)        unique values: 1,280        mean=-0.049514  std=0.170451  min=-0.552233  max=+0.453748            '''                #plot_loaded_weights(net_tnn, "tnn", "TNN (ternary -1/0/+1)", is_ternary=True)        '''    Loaded TNN (ternary -1/0/+1) — weight statistics    --------------------------------------------------      fc1 shape=(256, 784)        -1: 10,772 (5.37%)        +0: 173,311 (86.35%)        +1: 16,621 (8.28%)      fc2 shape=(128, 256)        -1: 5,365 (16.37%)        +0: 25,053 (76.46%)        +1: 2,350 (7.17%)      fc3 shape=(10, 128)        -1: 700 (54.69%)        +0: 478 (37.34%)        +1: 102 (7.97%)                            24 may check reproducibility    TNN (ternary -1/0/+1) — weight statistics    --------------------------------------------------      fc1 shape=(256, 784)        -1: 10,772 (5.37%)        +0: 173,311 (86.35%)        +1: 16,621 (8.28%)      fc2 shape=(128, 256)        -1: 5,365 (16.37%)        +0: 25,053 (76.46%)        +1: 2,350 (7.17%)      fc3 shape=(10, 128)        -1: 700 (54.69%)        +0: 478 (37.34%)        +1: 102 (7.97%)            '''    print("=" * 60)
+'''
+In The Name of God
+
+Ali Pilehvar Meibody
+
+Last Update : 07 sep 2026
+
+
+04_Load_ANN_TNN.py
+
+
+In 03 we trained the optimal ANN, TNN, Inference TNN which finally we got some .pth 
+files , here we just load again these models and we got some plots to be sure
+and also others can used this to load 
+
+
+
+
+Here we have ANN.pth that we get the weigths and then we mount on the ANN structrue
+also for ternary we again load from TNN.pth and again we mount on TNN .
+so we are sure that this is our weights
+
+
+
+Notes for later:
+    later we must have one file for Neural Network architectures and make_loaders
+    
+'''
+
+
+
+# ============================================
+'''                   Imports              '''
+# ============================================
+
+import os
+import random
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+from datetime import date
+from pathlib import Path
+
+from paths import choose_checkpoint
+
+import torch.optim as optim
+
+from pathlib import Path
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn as nn
+
+
+
+# ============================================
+'''                Variables              '''
+# ============================================
+SEED = 42  # change this to try other runs; keep fixed for identical results
+
+batch_size = 16
+BATCH_SIZE = batch_size
+
+#learning_rate = 0.0001 #for ANN
+learning_rate=1e-4 #for TNN
+LEARNING_RATE = learning_rate
+
+num_epochs = 100
+NUM_EPOCHS = num_epochs
+
+SAVE_FIGS = False
+SAVE_CHECKPOINTS = False
+
+
+
+
+FIGURE_DPI = 150
+THRESHOLD = 0.05
+SMOOTH_TW_WIDTH = 0.7
+DEVICE = torch.device("cpu")
+
+
+
+
+# ============================================
+# Model (same as ANN_MNIST / first_Cross_Sim / Base_ANN_TNN)
+# ============================================
+class ANN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(784, 256)
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(128, 10)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        return self.fc3(x)
+
+
+
+
+
+# ============================================
+# Load helpers
+# ============================================
+def _load_torch_file(path: Path, device=DEVICE):
+    try:
+        return torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=device)
+
+
+def _extract_state_dict(ckpt) -> dict:
+    if isinstance(ckpt, dict) and "state_dict" in ckpt:
+        return ckpt["state_dict"]
+    if isinstance(ckpt, dict) and all(k.startswith("fc") for k in ckpt):
+        return ckpt
+    raise ValueError(
+        "Checkpoint format not recognized. Expected dict with 'state_dict' "
+        "or raw state_dict keys (fc1.weight, ...)."
+    )
+
+
+def _require_checkpoint(path: Path) -> Path:
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Missing checkpoint: {path}")
+    return path
+
+
+def _load_from_checkpoint(path: Path, device, verify_ternary: bool = False) -> tuple[ANN, dict]:
+    path = _require_checkpoint(path)
+    ckpt = _load_torch_file(path, device)
+    state = _extract_state_dict(ckpt)
+    model = ANN().to(device)
+    model.load_state_dict(state)
+    model.eval()
+    if verify_ternary:
+        _verify_ternary_weights(model, path.name)
+    meta = ckpt if isinstance(ckpt, dict) else {}
+    return model, meta
+
+
+def load_ann(
+    checkpoint: Path | str | None = None,
+    device: torch.device | str = DEVICE,
+) -> tuple[ANN, Path, dict]:
+    """Load baseline ANN (full-precision weights)."""
+    if checkpoint is None:
+        checkpoint = choose_checkpoint("ann")
+    path = _require_checkpoint(checkpoint)
+    model, meta = _load_from_checkpoint(path, device, verify_ternary=False)
+    return model, path, meta
+
+
+def load_tnn_ternary(
+    checkpoint: Path | str | None = None,
+    device: torch.device | str = DEVICE,
+) -> tuple[ANN, Path, dict]:
+    """Load ternary-only TNN ({-1, 0, +1} weights) for inference / CrossSim."""
+    if checkpoint is None:
+        checkpoint = choose_checkpoint("tnn")
+    path = _require_checkpoint(checkpoint)
+    model, meta = _load_from_checkpoint(path, device, verify_ternary=True)
+    return model, path, meta
+
+
+def _verify_ternary_weights(model: ANN, label: str) -> None:
+    allowed = {-1.0, 0.0, 1.0}
+    for name in ("fc1", "fc2", "fc3"):
+        w = getattr(model, name).weight.detach()
+        uniq = set(torch.unique(w).tolist())
+        if not uniq.issubset(allowed):
+            raise ValueError(f"{label}: {name}.weight has non-ternary values: {sorted(uniq)}")
+
+
+def collect_layer_info(model: ANN) -> list[dict]:
+    """Extract weight/bias arrays per Linear layer."""
+    layer_info = []
+    for name in ("fc1", "fc2", "fc3"):
+        layer = getattr(model, name)
+        w = layer.weight.detach().cpu().numpy()
+        b = layer.bias.detach().cpu().numpy()
+        layer_info.append({
+            "name": name,
+            "weight": w,
+            "bias": b,
+            "weight_shape": w.shape,
+        })
+    return layer_info
+
+
+def _print_weight_stats(layer_info: list[dict], model_label: str, is_ternary: bool) -> None:
+    print(f"\n{model_label} — weight statistics")
+    print("-" * 50)
+    for li in layer_info:
+        w = li["weight"]
+        uniq = np.unique(w)
+        print(f"  {li['name']} shape={li['weight_shape']}")
+        if is_ternary:
+            for v in (-1.0, 0.0, 1.0):
+                n = (w == v).sum()
+                print(f"    {v:+.0f}: {n:,} ({100 * n / w.size:.2f}%)")
+        else:
+            print(f"    unique values: {uniq.size:,}")
+            print(f"    mean={w.mean():+.6f}  std={w.std():.6f}  "
+                  f"min={w.min():+.6f}  max={w.max():+.6f}")
+
+
+def plot_loaded_weights(model: ANN, prefix: str, title_tag: str, is_ternary: bool = False) -> None:
+    """
+    Per-layer histograms, heatmaps, and fc1 filters for a loaded net_ann or net_tnn.
+    Saves figures under figures/cross_sim2_loaded_weights/.
+    """
+    layer_info = collect_layer_info(model)
+    _print_weight_stats(layer_info, title_tag, is_ternary)
+    n_layers = len(layer_info)
+    names = [li["name"] for li in layer_info]
+    ternary_bins = [-1.5, -0.5, 0.5, 1.5]
+
+    # 1) Per-layer weight & bias histograms
+    fig, axes = plt.subplots(n_layers, 2, figsize=(12, 4 * n_layers))
+    if n_layers == 1:
+        axes = np.array([axes])
+    for row, li in enumerate(layer_info):
+        w, b = li["weight"].ravel(), li["bias"].ravel()
+        if is_ternary:
+            axes[row, 0].hist(
+                w, bins=ternary_bins, color="seagreen", edgecolor="black",
+                alpha=0.9, align="mid",
+            )
+            axes[row, 0].set_xticks([-1, 0, 1])
+        else:
+            axes[row, 0].hist(w, bins=80, color="steelblue", edgecolor="white", alpha=0.85)
+            axes[row, 0].axvline(0, color="red", linestyle="--", linewidth=1, label="zero")
+        axes[row, 0].set_title(f"{li['name']} — weights (n={len(w):,})")
+        axes[row, 0].set_xlabel("weight value")
+        axes[row, 0].set_ylabel("count")
+        if not is_ternary:
+            axes[row, 0].legend()
+        axes[row, 1].hist(b, bins=40, color="darkorange", edgecolor="white", alpha=0.85)
+        axes[row, 1].axvline(0, color="red", linestyle="--", linewidth=1, label="zero")
+        axes[row, 1].set_title(f"{li['name']} — biases (n={len(b):,})")
+        axes[row, 1].set_xlabel("bias value")
+        axes[row, 1].legend()
+    plt.suptitle(f"{title_tag} — per-layer distributions", fontsize=13, y=1.01)
+    plt.tight_layout()
+    if SAVE_FIGS:
+       p = f"{prefix}_layer_distributions.png"
+       plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")
+       print(f"Saved: {p}")
+    plt.show()
+        
+    plt.close()
+
+    # 2) Ternary composition bar chart (TNN only) or |weight| bars (ANN)
+    fig2, ax2 = plt.subplots(figsize=(8, 4))
+    x = np.arange(len(names))
+    if is_ternary:
+        width = 0.25
+        neg = [(li["weight"] == -1).mean() * 100 for li in layer_info]
+        zero = [(li["weight"] == 0).mean() * 100 for li in layer_info]
+        pos = [(li["weight"] == 1).mean() * 100 for li in layer_info]
+        ax2.bar(x - width, neg, width, label="-1", color="#0C5DA5")
+        ax2.bar(x, zero, width, label="0", color="#888888")
+        ax2.bar(x + width, pos, width, label="+1", color="#1B7F3B")
+        ax2.set_ylabel("% of weights")
+        ax2.set_title(f"{title_tag} — ternary composition per layer")
+        ax2.legend()
+    else:
+        mean_abs = [np.abs(li["weight"]).mean() for li in layer_info]
+        ax2.bar(names, mean_abs, color="steelblue", edgecolor="black")
+        ax2.set_ylabel("mean |weight|")
+        ax2.set_title(f"{title_tag} — mean |weight| per layer")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(names)
+    ax2.grid(True, axis="y", alpha=0.3)
+    plt.tight_layout()
+    if SAVE_FIGS:
+        p =f"{prefix}_composition_or_magnitude.png"
+        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")
+        print(f"Saved: {p}")
+        
+    plt.show()
+    plt.close()
+
+    # 3) Heatmaps: fc3 full + fc1 first 32 neurons
+    fig3, axes3 = plt.subplots(1, 2, figsize=(14, 5))
+    w3 = layer_info[-1]["weight"]
+    if is_ternary:
+        vmin, vmax, ticks = -1, 1, [-1, 0, 1]
+    else:
+        p99 = np.percentile(np.abs(w3), 99)
+        vmin, vmax, ticks = -p99, p99, None
+    im0 = axes3[0].imshow(w3, aspect="auto", cmap="RdBu_r", vmin=vmin, vmax=vmax)
+    axes3[0].set_title(f"fc3 weights {w3.shape[0]}×{w3.shape[1]}")
+    axes3[0].set_xlabel("input (hidden2)")
+    axes3[0].set_ylabel("class 0–9")
+    cbar0 = plt.colorbar(im0, ax=axes3[0], fraction=0.046)
+    if ticks is not None:
+        cbar0.set_ticks(ticks)
+    w1 = layer_info[0]["weight"][:32, :]
+    if is_ternary:
+        vmin1, vmax1 = -1, 1
+    else:
+        p99_1 = np.percentile(np.abs(w1), 99)
+        vmin1, vmax1 = -p99_1, p99_1
+    im1 = axes3[1].imshow(w1, aspect="auto", cmap="RdBu_r", vmin=vmin1, vmax=vmax1)
+    axes3[1].set_title("fc1 — first 32 neurons × 784 pixels")
+    axes3[1].set_xlabel("pixel index")
+    axes3[1].set_ylabel("neuron")
+    plt.colorbar(im1, ax=axes3[1], fraction=0.046)
+    plt.suptitle(f"{title_tag} — weight heatmaps (fc3 + fc1 subset)", fontsize=12)
+    plt.tight_layout()
+    if SAVE_FIGS:
+        p = f"{prefix}_weight_heatmaps.png"
+        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")
+        print(f"Saved: {p}")
+        
+    plt.show()
+    plt.close()
+
+    # 4) All three layer weight matrices
+    fig4, axes4 = plt.subplots(1, 3, figsize=(15, 4))
+    for ax, li in zip(axes4, layer_info):
+        w = li["weight"]
+        if is_ternary:
+            kw = dict(vmin=-1, vmax=1)
+        else:
+            p99 = np.percentile(np.abs(w), 99)
+            kw = dict(vmin=-p99, vmax=p99)
+        im = ax.imshow(w, aspect="auto", cmap="RdBu_r", **kw)
+        ax.set_title(f"{li['name']} {w.shape[0]}×{w.shape[1]}")
+        plt.colorbar(im, ax=ax, fraction=0.046)
+    plt.suptitle(f"{title_tag} — all layer weight matrices", fontsize=12)
+    plt.tight_layout()
+    if SAVE_FIGS:
+        p = f"{prefix}_all_layer_heatmaps.png"
+        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")
+        print(f"Saved: {p}")
+    plt.show()
+    plt.close()
+
+    # 5) fc1 input filters (first 16 neurons as 28×28)
+    fig5, axes5 = plt.subplots(4, 4, figsize=(8, 8))
+    w1_full = layer_info[0]["weight"]
+    for i, ax in enumerate(axes5.ravel()):
+        filt = w1_full[i].reshape(28, 28)
+        if is_ternary:
+            ax.imshow(filt, cmap="RdBu_r", vmin=-1, vmax=1)
+        else:
+            ax.imshow(filt, cmap="RdBu_r")
+        ax.set_title(f"neuron {i}", fontsize=8)
+        ax.axis("off")
+    plt.suptitle(f"{title_tag} — fc1 first 16 input filters (28×28)", fontsize=12)
+    plt.tight_layout()
+    
+    if SAVE_FIGS:
+        p = f"{prefix}_fc1_filters.png"
+        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")
+        print(f"Saved: {p}")
+    plt.show()
+    plt.close()
+    
+    # 6) Strongest fc1 filters (highest L1 norm)
+    w1_full = layer_info[0]["weight"]
+    
+    # importance of each neuron
+    scores = np.sum(np.abs(w1_full), axis=1)
+    
+    # top 16 strongest neurons
+    top_idx = np.argsort(scores)[-16:][::-1]
+    
+    fig6, axes6 = plt.subplots(4, 4, figsize=(8, 8))
+    
+    for ax, idx in zip(axes6.ravel(), top_idx):
+        filt = w1_full[idx].reshape(28, 28)
+    
+        if is_ternary:
+            ax.imshow(filt, cmap="RdBu_r", vmin=-1, vmax=1)
+        else:
+            ax.imshow(filt, cmap="RdBu_r")
+    
+        ax.set_title(f"Neuron {idx}", fontsize=8)
+        ax.axis("off")
+    
+    plt.suptitle(
+        f"{title_tag} — strongest fc1 filters",
+        fontsize=12
+    )
+    
+    plt.tight_layout()
+    
+    if SAVE_FIGS:
+        p = f"{prefix}_strongest_fc1_filters.png"
+        plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")
+    
+    plt.show()
+    plt.close()
+    
+    
+    # 7) Sparsity / active connection map
+    fig7, ax7 = plt.subplots(figsize=(10, 6))
+    
+    if is_ternary:
+        active_map = (w1_full != 0).astype(float)
+    
+        im = ax7.imshow(
+            active_map,
+            aspect="auto",
+            cmap="gray_r"
+        )
+    
+        ax7.set_title(
+            f"{title_tag} — active vs zero connections (fc1)"
+        )
+    
+        ax7.set_xlabel("Input pixel")
+        ax7.set_ylabel("Neuron")
+    
+        plt.colorbar(im, ax=ax7, fraction=0.046)
+    
+        plt.tight_layout()
+    
+        if SAVE_FIGS:
+            p = f"{prefix}_fc1_sparsity_map.png"
+            plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")
+    
+        plt.show()
+        plt.close()
+        
+    # 8) Positive / Negative / Zero decomposition
+    if is_ternary:
+    
+        neuron_idx = top_idx[0]
+    
+        filt = w1_full[neuron_idx].reshape(28, 28)
+    
+        pos = (filt == 1).astype(float)
+        neg = (filt == -1).astype(float)
+        zero = (filt == 0).astype(float)
+    
+        fig8, axes8 = plt.subplots(1, 3, figsize=(10, 3))
+    
+        axes8[0].imshow(pos, cmap="Reds")
+        axes8[0].set_title("+1 positions")
+        axes8[0].axis("off")
+    
+        axes8[1].imshow(neg, cmap="Blues")
+        axes8[1].set_title("-1 positions")
+        axes8[1].axis("off")
+    
+        axes8[2].imshow(zero, cmap="Greys")
+        axes8[2].set_title("0 positions")
+        axes8[2].axis("off")
+    
+        plt.suptitle(
+            f"{title_tag} — ternary decomposition of neuron {neuron_idx}",
+            fontsize=12
+        )
+    
+        plt.tight_layout()
+    
+        if SAVE_FIGS:
+            p = f"{prefix}_ternary_decomposition.png"
+            plt.savefig(p, dpi=FIGURE_DPI, bbox_inches="tight")
+    
+        plt.show()
+        plt.close()
+
+
+def print_model_summary(model: ANN, name: str, ckpt_path: Path, meta: dict) -> None:
+    n_params = sum(p.numel() for p in model.parameters())
+    acc = meta.get("test_accuracy")
+    acc_str = f"{acc:.2f}%" if acc is not None else "n/a"
+    print(f"\n{name}")
+    print(f"  checkpoint: {ckpt_path.name}")
+    print(f"  parameters: {n_params:,}")
+    print(f"  saved test accuracy: {acc_str}")
+    print(f"  layers: fc1 {tuple(model.fc1.weight.shape)}, "
+          f"fc2 {tuple(model.fc2.weight.shape)}, fc3 {tuple(model.fc3.weight.shape)}")
+
+
+
+
+
+
+if __name__ == "__main__":
+    
+    # ============================================
+    # Load both networks (import / %run executes this)
+    # ============================================
+    print("=" * 60)
+    print("Load ANN and TNN. Enter keeps the newest match in Pth_Models.")
+    print("=" * 60)
+    
+    net_ann, ann_path, ann_meta = load_ann()
+    
+    print_model_summary(net_ann, "ANN (full-precision)", ann_path, ann_meta)
+    
+    '''
+    ANN (full-precision)
+      checkpoint: BASE_ANN_mnist_lr0.0001_ep100_seed42_20260522.pth
+      parameters: 235,146
+      saved test accuracy: 98.00%
+      layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)
+      
+      
+                  #also we check for 24 may
+                  
+    ANN (full-precision)
+      checkpoint: BASE_ANN_mnist_lr0.0001_ep100_seed42_20260525.pth
+      parameters: 235,146
+      saved test accuracy: 98.00%
+      layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)
+      
+    '''
+    
+    
+    net_tnn, tnn_path, tnn_meta = load_tnn_ternary()
+    
+    print_model_summary(net_tnn, "TNN (ternary -1/0/+1)", tnn_path, tnn_meta)
+    
+    '''
+    TNN (ternary -1/0/+1)
+      checkpoint: TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260522.pth
+      parameters: 235,146
+      saved test accuracy: 93.78%
+      layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)
+      
+    TNN (ternary -1/0/+1)
+      checkpoint: TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260525.pth
+      parameters: 235,146
+      saved test accuracy: 93.78%
+      layers: fc1 (256, 784), fc2 (128, 256), fc3 (10, 128)
+      
+    '''
+    
+    # ============================================
+    # Weight distributions & heatmaps (both models)
+    # ============================================
+    print("\n" + "=" * 60)
+    print("Plotting loaded weight distributions & heatmaps")
+    print("=" * 60)
+    
+    #plot_loaded_weights(net_ann, "ann", "ANN (full-precision)", is_ternary=False)
+    
+    '''
+    Loaded ANN (full-precision) — weight statistics
+    --------------------------------------------------
+      fc1 shape=(256, 784)
+        unique values: 200,477
+        mean=+0.001846  std=0.054868  min=-0.505663  max=+0.305334
+      fc2 shape=(128, 256)
+        unique values: 32,757
+        mean=+0.009993  std=0.094967  min=-0.481511  max=+0.567566
+      fc3 shape=(10, 128)
+        unique values: 1,280
+        mean=-0.049514  std=0.170451  min=-0.552233  max=+0.453748
+        
+        
+        
+    24 MAY check reproducibility
+    ANN (full-precision) — weight statistics
+    --------------------------------------------------
+      fc1 shape=(256, 784)
+        unique values: 200,477
+        mean=+0.001846  std=0.054868  min=-0.505663  max=+0.305334
+      fc2 shape=(128, 256)
+        unique values: 32,757
+        mean=+0.009993  std=0.094967  min=-0.481511  max=+0.567566
+      fc3 shape=(10, 128)
+        unique values: 1,280
+        mean=-0.049514  std=0.170451  min=-0.552233  max=+0.453748
+        
+    '''
+    
+    
+    
+    #plot_loaded_weights(net_tnn, "tnn", "TNN (ternary -1/0/+1)", is_ternary=True)
+    
+    '''
+    Loaded TNN (ternary -1/0/+1) — weight statistics
+    --------------------------------------------------
+      fc1 shape=(256, 784)
+        -1: 10,772 (5.37%)
+        +0: 173,311 (86.35%)
+        +1: 16,621 (8.28%)
+      fc2 shape=(128, 256)
+        -1: 5,365 (16.37%)
+        +0: 25,053 (76.46%)
+        +1: 2,350 (7.17%)
+      fc3 shape=(10, 128)
+        -1: 700 (54.69%)
+        +0: 478 (37.34%)
+        +1: 102 (7.97%)
+        
+        
+        
+    24 may check reproducibility
+    TNN (ternary -1/0/+1) — weight statistics
+    --------------------------------------------------
+      fc1 shape=(256, 784)
+        -1: 10,772 (5.37%)
+        +0: 173,311 (86.35%)
+        +1: 16,621 (8.28%)
+      fc2 shape=(128, 256)
+        -1: 5,365 (16.37%)
+        +0: 25,053 (76.46%)
+        +1: 2,350 (7.17%)
+      fc3 shape=(10, 128)
+        -1: 700 (54.69%)
+        +0: 478 (37.34%)
+        +1: 102 (7.97%)
+        
+    '''
+    print("=" * 60)
+
+
+
+
+
+
+

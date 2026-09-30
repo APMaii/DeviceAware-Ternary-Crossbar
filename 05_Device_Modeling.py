@@ -65,14 +65,16 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from paths import DEVICE_DATA_DIR
+
 
 
 # ============================================================
 # SECTION 0 — IMPORTS AND PATHS
 # ============================================================
 
-DRIFT_DIR = "/Users/apm/Desktop/tern-net/Device_Data"
-IV_FILE = f"{DRIFT_DIR}/APM_Datafinal.xlsx"
+DRIFT_DIR = str(DEVICE_DATA_DIR)
+IV_FILE = str(DEVICE_DATA_DIR / "APM_Datafinal.xlsx")
 
 drift_files = sorted(glob.glob(os.path.join(DRIFT_DIR, "*_Ron-off*.csv")))
 
@@ -127,7 +129,7 @@ for f in drift_files:
     print(os.path.basename(f))
 
 if len(drift_files) == 0:
-    raise FileNotFoundError("No Ron-off*.csv files found.")
+    raise FileNotFoundError(f"No *_Ron-off*.csv files in {DRIFT_DIR}")
 
 
 def parse_drift_filename(path):
@@ -252,6 +254,12 @@ plt.show()
 # ============================================================
 #  LOAD I-V HYSTERESIS DATA
 # ============================================================
+
+if not os.path.isfile(IV_FILE):
+    raise FileNotFoundError(
+        f"Missing I-V workbook: {IV_FILE}\n"
+        "Put APM_Datafinal.xlsx in Device_Data/, or set DEVICE_DATA_DIR."
+    )
 
 raw = pd.read_excel(IV_FILE, header=None)
 

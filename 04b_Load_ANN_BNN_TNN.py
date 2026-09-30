@@ -34,6 +34,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 from pathlib import Path
 
+from paths import DATA_DIR, PROJECT_DIR, choose_checkpoint
+
 
 
 
@@ -48,19 +50,7 @@ SAVE_FIGS = False
 FIGURE_DPI = 150
 DEVICE = torch.device("cpu")
 
-PTH_DIR = "/Users/apm/Desktop/tern-net/Pth_Models/"
-
-try:
-    PROJECT_DIR = Path(__file__).resolve().parent
-except NameError:
-    PROJECT_DIR = Path.cwd()
-
 FIGURES_DIR = PROJECT_DIR / "figures" / "load_ann_bnn_tnn"
-
-ANN_CHECKPOINT = f"{PTH_DIR}BASE_ANN_mnist_lr0.0001_ep100_seed42_20260908.pth"
-BNN_CHECKPOINT = f"{PTH_DIR}07_sep_2026_BNN.pth"
-TNN_CHECKPOINT = f"{PTH_DIR}TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260908.pth"
-TNN_TRAIN_CHECKPOINT = f"{PTH_DIR}BASE_TNN_mnist_smooth_tw_w0.7_lr0.0001_ep100_seed42_20260908.pth"
 
 ACADEMIC_COLORS = {
     "ANN": "#1F4E79",  # navy
@@ -173,13 +163,13 @@ def _load_from_checkpoint(path: Path, device) -> tuple:
     return model, meta
 
 
-def load_ann(checkpoint=ANN_CHECKPOINT, device=DEVICE):
+def load_ann(checkpoint, device=DEVICE):
     path = _require_checkpoint(checkpoint)
     model, meta = _load_from_checkpoint(path, device)
     return model, path, meta
 
 
-def load_bnn(checkpoint=BNN_CHECKPOINT, device=DEVICE):
+def load_bnn(checkpoint, device=DEVICE):
     """Load BNN latent weights, then binarize to {-1, +1} for inference / plots."""
     path = _require_checkpoint(checkpoint)
     model, meta = _load_from_checkpoint(path, device)
@@ -188,7 +178,7 @@ def load_bnn(checkpoint=BNN_CHECKPOINT, device=DEVICE):
     return model, path, meta
 
 
-def load_tnn_ternary(checkpoint=TNN_CHECKPOINT, device=DEVICE):
+def load_tnn_ternary(checkpoint, device=DEVICE):
     path = _require_checkpoint(checkpoint)
     model, meta = _load_from_checkpoint(path, device)
     _verify_ternary_weights(model, path.name)
@@ -255,7 +245,7 @@ def make_loaders():
         transforms.Lambda(lambda x: x.view(-1)),
     ])
     test_dataset = datasets.MNIST(
-        root=str(PROJECT_DIR / "data"), train=False, transform=transform, download=True,
+        root=str(DATA_DIR), train=False, transform=transform, download=True,
     )
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
     return test_loader
@@ -706,10 +696,16 @@ if __name__ == "__main__":
     print("=" * 60)
     print("Load ANN, BNN, TNN — comparison plots")
     print("=" * 60)
+    print("Pick a saved model for each network. Enter keeps the newest match.")
 
-    net_ann, ann_path, ann_meta = load_ann(ANN_CHECKPOINT)
-    net_bnn, bnn_path, bnn_meta = load_bnn(BNN_CHECKPOINT)
-    net_tnn, tnn_path, tnn_meta = load_tnn_ternary(TNN_CHECKPOINT)
+    ann_checkpoint = choose_checkpoint("ann")
+    bnn_checkpoint = choose_checkpoint("bnn")
+    tnn_checkpoint = choose_checkpoint("tnn")
+    tnn_train_checkpoint = choose_checkpoint("tnn_train")
+
+    net_ann, ann_path, ann_meta = load_ann(ann_checkpoint)
+    net_bnn, bnn_path, bnn_meta = load_bnn(bnn_checkpoint)
+    net_tnn, tnn_path, tnn_meta = load_tnn_ternary(tnn_checkpoint)
 
     test_loader = make_loaders()
     ann_acc, ann_pc = evaluate_accuracy(net_ann, test_loader)
@@ -766,7 +762,7 @@ if __name__ == "__main__":
     accs = {"ANN": ann_acc, "BNN": bnn_acc, "TNN": tnn_acc}
     per_class = {"ANN": ann_pc, "BNN": bnn_pc, "TNN": tnn_pc}
 
-    tnn_train_ckpt = _load_torch_file(Path(TNN_TRAIN_CHECKPOINT))
+    tnn_train_ckpt = _load_torch_file(Path(tnn_train_checkpoint))
     loss_histories = collect_train_losses(ann_meta, bnn_meta, tnn_train_ckpt)
 
     print("\n" + "=" * 60)

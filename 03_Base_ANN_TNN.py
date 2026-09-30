@@ -121,6 +121,7 @@ from pathlib import Path
 
 import torch.optim as optim
 
+from paths import DATA_DIR, FIGURES_DIR as PROJECT_FIGURES_DIR, PTH_DIR
 
 
 # ============================================
@@ -141,24 +142,13 @@ NUM_EPOCHS = num_epochs
 SAVE_FIGS = False
 SAVE_CHECKPOINTS = True
 
-
-
-
-PTH_DIR= '/Users/apm/Desktop/tern-net/Pth_Models/'
-
-
 FIGURE_DPI = 150
 THRESHOLD = 0.05
 SMOOTH_TW_WIDTH = 0.7
 DEVICE = torch.device("cpu")
-try:
-    PROJECT_DIR = Path(__file__).resolve().parent
-except NameError:
-    PROJECT_DIR = Path.cwd()
 
-FIGURES_DIR = PROJECT_DIR / "figures" / "base_ann_tnn"
-TERNARY_INFERENCE_FIGURES_DIR = PROJECT_DIR / "figures" / "tnn_ternary_inference_only"
-CHECKPOINT_DIR = PROJECT_DIR / "checkpoints" / "base_ann_tnn"
+FIGURES_DIR = PROJECT_FIGURES_DIR / "base_ann_tnn"
+TERNARY_INFERENCE_FIGURES_DIR = PROJECT_FIGURES_DIR / "tnn_ternary_inference_only"
 
 
 
@@ -193,10 +183,10 @@ def make_loaders():
         transforms.Lambda(lambda x: x.view(-1)),
     ])
     train_dataset = datasets.MNIST(
-        root=str(PROJECT_DIR / "data"), train=True, transform=transform, download=True,
+        root=str(DATA_DIR), train=True, transform=transform, download=True,
     )
     test_dataset = datasets.MNIST(
-        root=str(PROJECT_DIR / "data"), train=False, transform=transform, download=True,
+        root=str(DATA_DIR), train=False, transform=transform, download=True,
     )
     train_generator = torch.Generator().manual_seed(SEED)
     train_loader = DataLoader(
@@ -827,7 +817,7 @@ def save_checkpoint(model, filename, extra=None):
     }
     if extra:
         payload.update(extra)
-    path = CHECKPOINT_DIR / filename
+    path = PTH_DIR / filename
     torch.save(payload, path)
     print(f"Saved checkpoint: {path}")
     return path
@@ -843,7 +833,7 @@ def save_ternary_only_checkpoint(model, filename, extra=None):
     }
     if extra:
         payload.update(extra)
-    path = CHECKPOINT_DIR / filename
+    path = PTH_DIR / filename
     torch.save(payload, path)
     print(f"Saved ternary-only checkpoint: {path}")
     return path
@@ -1038,7 +1028,7 @@ plot_training_loss(ann_history, "ann", "MNIST ANN")
 if SAVE_CHECKPOINTS:
     save_checkpoint(
         ann_model,
-        f"{PTH_DIR}BASE_ANN_mnist_lr{LEARNING_RATE}_ep{NUM_EPOCHS}_seed{SEED}_{run_date}.pth",
+        f"BASE_ANN_mnist_lr{LEARNING_RATE}_ep{NUM_EPOCHS}_seed{SEED}_{run_date}.pth",
         extra={"model_type": "ANN", "test_accuracy": ann_acc, "train_loss": ann_history},
     )
 
@@ -1213,7 +1203,7 @@ plot_tnn_ternary_extra(tnn_model, "tnn", "MNIST TNN")
 if SAVE_CHECKPOINTS:
     save_checkpoint(
         tnn_model,
-        f"{PTH_DIR}BASE_TNN_mnist_smooth_tw_w{SMOOTH_TW_WIDTH}_lr{LEARNING_RATE}_ep{NUM_EPOCHS}_seed{SEED}_{run_date}.pth",
+        f"BASE_TNN_mnist_smooth_tw_w{SMOOTH_TW_WIDTH}_lr{LEARNING_RATE}_ep{NUM_EPOCHS}_seed{SEED}_{run_date}.pth",
         extra={
             "model_type": "TNN",
             "surrogate": "smooth_threshold_window",
@@ -1296,7 +1286,7 @@ print("Done.")
 print(f"  ANN accuracy: {ann_acc:.2f}%")
 print(f"  TNN accuracy: {tnn_acc:.2f}%")
 print(f"  Figures:  {FIGURES_DIR}")
-print(f"  Weights:  {CHECKPOINT_DIR}")
+print(f"  Weights:  {PTH_DIR}")
 print("=" * 60)
 
 
@@ -1597,7 +1587,7 @@ run_ternary_inference_eda_plots(
 if SAVE_CHECKPOINTS:
     save_ternary_only_checkpoint(
         ternary_inf_model,
-        f"{PTH_DIR}TERNARY_ONLY_mnist_tw{SMOOTH_TW_WIDTH}_th{THRESHOLD}_seed{SEED}_{run_date}.pth",
+        f"TERNARY_ONLY_mnist_tw{SMOOTH_TW_WIDTH}_th{THRESHOLD}_seed{SEED}_{run_date}.pth",
         extra={
             "test_accuracy": ternary_inf_acc,
             "test_set_evaluation": ternary_test_results,

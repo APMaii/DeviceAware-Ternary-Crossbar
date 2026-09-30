@@ -1,1 +1,1815 @@
-'''In The Name of GodAli Pilehvar MeibodyLast Update : 07 sep 202602_TNN_Optimization.pyIn this file  , we create our TernaryLinear , TernaryFunctions, TernaryMNISTand first without backpropagation which is saved as 24may_TNN_without_BP.pthThen we try different strategies for back propagations, we compare all of themwe pick top 3 and we compare the top3 and we have tehse 3 mdoeled togethers.all these three models named scaled_ste_0.7.pt, scaled_ste_0.75.pt and smooth_tw_0.7.ptare saved in /Users/apm/Desktop/MASTER THESIS/Projects/04_VOL_Non_Vol/24May/Pth_Models/Top3Candidate20May'''# ============================================'''                   Imports              '''# ============================================import osimport randomimport numpy as npimport torchimport torch.nn as nnimport torch.nn.functional as Ffrom torchvision import datasets, transformsfrom torch.utils.data import DataLoaderimport matplotlib.pyplot as plt# ============================================'''                Variables              '''# ============================================SEED = 42  # change this to try other runs; keep fixed for identical resultsbatch_size = 16#learning_rate = 0.0001 #for ANNlearning_rate=1e-4 #for TNNnum_epochs = 100SAVE_FIGS = False PTH_DIR= '/Users/apm/Desktop/tern-net/Pth_Models/'date_name='07_sep_2026'# ============================================# 0) Reproducibility — fix all random sources# ============================================def set_seed(seed: int = SEED) -> None:    """Set seeds so weight init, shuffling, and training are reproducible."""    random.seed(seed)    np.random.seed(seed)    torch.manual_seed(seed)    torch.cuda.manual_seed(seed)    torch.cuda.manual_seed_all(seed)    # CuDNN / CUDA: deterministic ops (relevant if you switch to GPU later)    torch.backends.cudnn.deterministic = True    torch.backends.cudnn.benchmark = False    # PyTorch >= 1.8: stricter determinism on CUDA (no effect on pure CPU)    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")    # Fail on known non-deterministic ops (use warn_only=True if something breaks)    torch.use_deterministic_algorithms(True, warn_only=True)set_seed(SEED)print(f"Random seed set to {SEED} (reproducible run)")# ============================================# 1) Transform MNIST# ============================================transform = transforms.Compose([    transforms.ToTensor(),    transforms.Normalize((0.1307,), (0.3081,)),    transforms.Lambda(lambda x: x.view(-1))])# ============================================# 2) Load MNIST# ============================================train_dataset = datasets.MNIST(    root="./data",    train=True,    transform=transform,    download=True)test_dataset = datasets.MNIST(    root="./data",    train=False,    transform=transform,    download=True)train_generator = torch.Generator().manual_seed(SEED)train_loader = DataLoader(    train_dataset,    batch_size=batch_size,    shuffle=True,    generator=train_generator)test_loader = DataLoader(    test_dataset,    batch_size=batch_size,    shuffle=False)########################################################################################################################################################################################################################################################################################'''                          TNN Without BP                         '''######################################################################################################################################################################################################################################################################################### ============================================# 3) Ternary Linear Layer# ============================================class TernaryLinear(nn.Linear):    def __init__(self, in_features, out_features, bias=True, threshold=0.05):        super().__init__(in_features, out_features, bias)        self.threshold = threshold    def ternary_weight(self):        w = self.weight        ternary_w = torch.where(            w > self.threshold,            torch.ones_like(w),            torch.where(                w < -self.threshold,                -torch.ones_like(w),                torch.zeros_like(w)            )        )        return ternary_w    def forward(self, input):        ternary_w = self.ternary_weight()        return F.linear(input, ternary_w, self.bias)# ============================================# 4) Ternary MNIST Network# ============================================class TernaryMNIST(nn.Module):    def __init__(self):        super().__init__()        self.fc1 = TernaryLinear(784, 256, threshold=0.05)        self.fc2 = TernaryLinear(256, 128, threshold=0.05)        # Keep final layer full precision first        self.fc3 = nn.Linear(128, 10)    def forward(self, x):        x = x.view(x.size(0), -1)        x = F.relu(self.fc1(x))        x = F.relu(self.fc2(x))        x = self.fc3(x)        return x# ============================================# 5) Model, Loss, Optimizer# ============================================model = TernaryMNIST()criterion = nn.CrossEntropyLoss()optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)# ============================================# 6) Training# ============================================train_losses = []for epoch in range(num_epochs):    model.train()    running_loss = 0    for images, labels in train_loader:        outputs = model(images)        loss = criterion(outputs, labels)        if torch.isnan(outputs).any():            print("NaN in outputs")            break        if torch.isnan(loss):            print("NaN in loss")            break        optimizer.zero_grad()        loss.backward()        optimizer.step()        running_loss += loss.item()    avg_loss = running_loss / len(train_loader)    train_losses.append(avg_loss)    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")'''24 may 2026Epoch 1/100, Loss: 2.3017Epoch 2/100, Loss: 2.3015Epoch 3/100, Loss: 2.3015Epoch 4/100, Loss: 2.3014Epoch 5/100, Loss: 2.3014Epoch 6/100, Loss: 2.3014Epoch 7/100, Loss: 2.3014Epoch 8/100, Loss: 2.3014Epoch 9/100, Loss: 2.3014Epoch 10/100, Loss: 2.3014Epoch 11/100, Loss: 2.3014Epoch 12/100, Loss: 2.3014Epoch 13/100, Loss: 2.3013Epoch 14/100, Loss: 2.3014Epoch 15/100, Loss: 2.3013Epoch 16/100, Loss: 2.3014Epoch 17/100, Loss: 2.3013Epoch 18/100, Loss: 2.3013Epoch 19/100, Loss: 2.3014Epoch 20/100, Loss: 2.3013Epoch 21/100, Loss: 2.3013Epoch 22/100, Loss: 2.3013Epoch 23/100, Loss: 2.3013Epoch 24/100, Loss: 2.3013Epoch 25/100, Loss: 2.3013Epoch 26/100, Loss: 2.3013Epoch 27/100, Loss: 2.3013Epoch 28/100, Loss: 2.3013Epoch 29/100, Loss: 2.3013Epoch 30/100, Loss: 2.3013Epoch 31/100, Loss: 2.3013Epoch 32/100, Loss: 2.3013Epoch 33/100, Loss: 2.3013Epoch 34/100, Loss: 2.3013Epoch 35/100, Loss: 2.3013Epoch 36/100, Loss: 2.3013Epoch 37/100, Loss: 2.3013Epoch 38/100, Loss: 2.3013Epoch 39/100, Loss: 2.3013Epoch 40/100, Loss: 2.3013Epoch 41/100, Loss: 2.3013Epoch 42/100, Loss: 2.3013Epoch 43/100, Loss: 2.3013Epoch 44/100, Loss: 2.3013Epoch 45/100, Loss: 2.3013Epoch 46/100, Loss: 2.3013Epoch 47/100, Loss: 2.3013Epoch 48/100, Loss: 2.3013Epoch 49/100, Loss: 2.3013Epoch 50/100, Loss: 2.3013Epoch 51/100, Loss: 2.3013Epoch 52/100, Loss: 2.3013Epoch 53/100, Loss: 2.3013Epoch 54/100, Loss: 2.3013Epoch 55/100, Loss: 2.3013Epoch 56/100, Loss: 2.3013Epoch 57/100, Loss: 2.3013Epoch 58/100, Loss: 2.3013Epoch 59/100, Loss: 2.3013Epoch 60/100, Loss: 2.3013Epoch 61/100, Loss: 2.3013Epoch 62/100, Loss: 2.3013Epoch 63/100, Loss: 2.3013Epoch 64/100, Loss: 2.3013Epoch 65/100, Loss: 2.3013Epoch 66/100, Loss: 2.3013Epoch 67/100, Loss: 2.3013Epoch 68/100, Loss: 2.3013Epoch 69/100, Loss: 2.3013Epoch 70/100, Loss: 2.3012Epoch 71/100, Loss: 2.3013Epoch 72/100, Loss: 2.3013Epoch 73/100, Loss: 2.3013Epoch 74/100, Loss: 2.3013Epoch 75/100, Loss: 2.3012Epoch 76/100, Loss: 2.3012Epoch 77/100, Loss: 2.3012Epoch 78/100, Loss: 2.3013Epoch 79/100, Loss: 2.3013Epoch 80/100, Loss: 2.3012Epoch 81/100, Loss: 2.3012Epoch 82/100, Loss: 2.3013Epoch 83/100, Loss: 2.3012Epoch 84/100, Loss: 2.3012Epoch 85/100, Loss: 2.3013Epoch 86/100, Loss: 2.3012Epoch 87/100, Loss: 2.3012Epoch 88/100, Loss: 2.3012Epoch 89/100, Loss: 2.3012Epoch 90/100, Loss: 2.3013Epoch 91/100, Loss: 2.3012Epoch 92/100, Loss: 2.3012Epoch 93/100, Loss: 2.3012Epoch 94/100, Loss: 2.3012Epoch 95/100, Loss: 2.3012Epoch 96/100, Loss: 2.3013Epoch 97/100, Loss: 2.3012Epoch 98/100, Loss: 2.3012Epoch 99/100, Loss: 2.3012Epoch 100/100, Loss: 2.3012'''# ============================================# 7) Evaluation# ============================================model.eval()correct = 0total = 0with torch.no_grad():    for images, labels in test_loader:        outputs = model(images)        predicted = outputs.argmax(dim=1)        total += labels.size(0)        correct += (predicted == labels).sum().item()accuracy = 100 * correct / totalprint(f"Test Accuracy: {accuracy:.2f}%")'''Test Accuracy: 11.35%'''#------- SAVE --------checkpoint = {    'epoch': num_epochs,    'model_state_dict': model.state_dict(),    'optimizer_state_dict': optimizer.state_dict(),    'loss': avg_loss}torch.save(checkpoint, f"{PTH_DIR}{date_name}_may_TNN_without_BP.pth")# ============================================# 8) Plot training loss (simple)# ============================================epochs = np.arange(1, num_epochs + 1)layer_names = ["fc1", "fc2", "fc3"]layers = [model.fc1, model.fc2, model.fc3]layer_colors = ["#059669", "#7c3aed", "#dc2626"]_plot_rc = {    "figure.facecolor": "white",    "axes.facecolor": "#f8fafc",    "axes.edgecolor": "#cbd5e1",    "axes.labelcolor": "#334155",    "axes.titleweight": "bold",    "axes.titlesize": 13,    "axes.labelsize": 11,    "xtick.color": "#475569",    "ytick.color": "#475569",    "grid.color": "#e2e8f0",    "grid.linestyle": "-",    "font.family": "sans-serif",}plt.rcParams.update(_plot_rc)def _style_axis(ax):    ax.spines["top"].set_visible(False)    ax.spines["right"].set_visible(False)    ax.grid(True, alpha=0.6)def _layer_param_norm(module):    """L2 norm over weight + bias of a layer."""    sq = sum(p.detach().pow(2).sum().item() for p in module.parameters())    return sq ** 0.5def _layer_grad_norm(module, loss):    """L2 norm of gradients (weight + bias); fallback if .grad is None."""    grads = []    for p in module.parameters():        if not p.requires_grad:            continue        g = p.grad        if g is None:            g = torch.autograd.grad(loss, p, retain_graph=True, allow_unused=True)[0]        if g is not None:            grads.append(g.detach())    if not grads:        return 0.0    return (sum(g.pow(2).sum().item() for g in grads)) ** 0.5def _bar_labels(ax, bars, fmt="{:.3f}"):    for bar in bars:        h = bar.get_height()        ax.text(            bar.get_x() + bar.get_width() / 2, h,            fmt.format(h), ha="center", va="bottom", fontsize=9, color="#334155",        )# --- Figure 1: Training loss curve ---fig1, ax1 = plt.subplots(figsize=(9, 5.5), dpi=120)ax1.plot(    epochs, train_losses, color="#2563eb", linewidth=2.5,    marker="o", markersize=5, markevery=max(1, num_epochs // 10),    markerfacecolor="white", markeredgewidth=1.5, markeredgecolor="#2563eb",    label="Train loss", zorder=3,)ax1.fill_between(epochs, train_losses, min(train_losses), color="#2563eb", alpha=0.08)ax1.set_title("Training Loss")ax1.set_xlabel("Epoch")ax1.set_ylabel("Cross-entropy loss")ax1.set_xlim(1, num_epochs)_style_axis(ax1)ax1.legend(frameon=True, fancybox=True, shadow=False, edgecolor="#e2e8f0")fig1.tight_layout()plt.show()# --- Figure 2: Loss change per epoch ---loss_change = np.diff(train_losses)epoch_change = epochs[1:]fig2, ax2 = plt.subplots(figsize=(9, 5.5), dpi=120)bar_colors = ["#10b981" if v <= 0 else "#ef4444" for v in loss_change]bars2 = ax2.bar(epoch_change, loss_change, color=bar_colors, alpha=0.85, width=0.85, edgecolor="white", linewidth=0.6)ax2.axhline(0, color="#64748b", linewidth=1.0)ax2.set_title("Loss Change per Epoch")ax2.set_xlabel("Epoch")ax2.set_ylabel("Delta loss")_style_axis(ax2)fig2.tight_layout()plt.show()# --- Figure 3: Weight L2 norm per layer ---weight_norms = [_layer_param_norm(layer) for layer in layers]fig3, ax3 = plt.subplots(figsize=(9, 5.5), dpi=120)bars3 = ax3.bar(layer_names, weight_norms, color=layer_colors, alpha=0.9, width=0.55, edgecolor="white", linewidth=0.8)ax3.set_title("Full-Precision Weight Norms per Layer")ax3.set_ylabel("L2 norm")_style_axis(ax3)_bar_labels(ax3, bars3, fmt="{:.2f}")fig3.tight_layout()plt.show()# --- Figure 4: Gradient L2 norm per layer (one backprop step) ---model.train()images, labels = next(iter(train_loader))optimizer.zero_grad(set_to_none=True)loss = criterion(model(images), labels)loss.backward()grad_norms = [_layer_grad_norm(layer, loss) for layer in layers]fig4, ax4 = plt.subplots(figsize=(9, 5.5), dpi=120)bars4 = ax4.bar(layer_names, grad_norms, color=layer_colors, alpha=0.9, width=0.55, edgecolor="white", linewidth=0.8)ax4.set_title("Gradient Norms per Layer (one batch)")ax4.set_ylabel("L2 norm of gradients")_style_axis(ax4)_bar_labels(ax4, bars4, fmt="{:.4f}")fig4.tight_layout()plt.show()########################################################################################################################################################################################################################################################################################'''                    TNN With different BP                     '''######################################################################################################################################################################################################################################################################################### ============================================# 3) Ternary Weight Function with STE# ============================================class TernaryWeightFunction(torch.autograd.Function):    @staticmethod    def forward(ctx, weight, threshold):        ctx.save_for_backward(weight)                #for option 6        #ctx.threshold = threshold        ternary_w = torch.where(            weight > threshold,            torch.ones_like(weight),            torch.where(                weight < -threshold,                -torch.ones_like(weight),                torch.zeros_like(weight)            )        )        return ternary_w    @staticmethod    def backward(ctx, grad_output):        weight, = ctx.saved_tensors                #--------------------------------------        #option1 : Plain STE        #grad_weight = grad_output.clone()                        #--------------------------------------        #option2 : Clipped STE         # Straight-Through Estimator surrogate gradient        #grad_weight = grad_output.clone()        # Optional gradient clipping mask        #grad_weight = grad_weight * (weight.abs() <= 1.0).float()                        #--------------------------------------        #option3 : Scaled STE        #grad_weight = grad_output.clone() * 0.80                                                #--------------------------------------        #option4:Bi-Real style triangular surrogate        #grad_surrogate = torch.clamp(2.0 - 2.0 * weight.abs(), min=0.0)        #grad_weight = grad_output * grad_surrogate                                #--------------------------------------        #option5: tanh / IR-Net style surrogate        beta = 3.0        grad_surrogate = beta * (1.0 - torch.tanh(beta * weight) ** 2)        grad_weight = grad_output * grad_surrogate                                        #--------------------------------------        #option6 : threshold-window surrogate for ternary        #uncomment also in forward()                        #threshold = ctx.threshold        #width = 0.7        #near_pos_threshold = (weight - threshold).abs() <= width        #near_neg_threshold = (weight + threshold).abs() <= width        #grad_surrogate = (near_pos_threshold | near_neg_threshold).float()        #grad_weight = grad_output * grad_surrogate                                        #option 7 : Even smoother --> smooth threshold-window surrogate for ternary        #threshold = ctx.threshold        #width = 0.9        #dist_pos = (weight - threshold).abs()        #dist_neg = (weight + threshold).abs()        #grad_pos = torch.clamp(1.0 - dist_pos / width, min=0.0)        #grad_neg = torch.clamp(1.0 - dist_neg / width, min=0.0)        #grad_surrogate = torch.maximum(grad_pos, grad_neg)        #grad_weight = grad_output * grad_surrogate                return grad_weight, None           # ============================================# 4) Ternary Linear Layer# ============================================class TernaryLinear(nn.Linear):    def __init__(self, in_features, out_features, bias=True, threshold=0.05):        super().__init__(in_features, out_features, bias)        self.threshold = threshold    def ternary_weight(self):        return TernaryWeightFunction.apply(self.weight, self.threshold)    def forward(self, input):        ternary_w = self.ternary_weight()        return F.linear(input, ternary_w, self.bias)# ============================================# 5) Ternary Neural Network# ============================================class TernaryMNIST(nn.Module):    def __init__(self):        super().__init__()        self.fc1 = TernaryLinear(784, 256, threshold=0.05)        self.fc2 = TernaryLinear(256, 128, threshold=0.05)        # Keep output layer full precision first        #self.fc3 = nn.Linear(128, 10)        self.fc3 = TernaryLinear(128, 10, threshold=0.05)    def forward(self, x):        x = x.view(x.size(0), -1)        x = F.relu(self.fc1(x))        x = F.relu(self.fc2(x))        x = self.fc3(x)        return x# ============================================# 6) Model, Loss, Optimizer# ============================================model = TernaryMNIST()criterion = nn.CrossEntropyLoss()optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)# ============================================# 7) Training Loop# ============================================num_epochs = 100train_losses = []for epoch in range(num_epochs):    model.train()    running_loss = 0.0    for images, labels in train_loader:        outputs = model(images)        if torch.isnan(outputs).any():            print("NaN in outputs")            break        loss = criterion(outputs, labels)        if torch.isnan(loss):            print("NaN in loss")            break        optimizer.zero_grad()        loss.backward()        optimizer.step()        running_loss += loss.item()    avg_loss = running_loss / len(train_loader)    train_losses.append(avg_loss)    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")# ============================================# 8) Evaluation# ============================================model.eval()correct = 0total = 0with torch.no_grad():    for images, labels in test_loader:        outputs = model(images)        predicted = outputs.argmax(dim=1)        total += labels.size(0)        correct += (predicted == labels).sum().item()accuracy = 100 * correct / totalprint(f"Test Accuracy: {accuracy:.2f}%")# ============================================# 9) Plot Training Loss# ============================================plt.figure(figsize=(7, 4))plt.plot(range(1, num_epochs + 1), train_losses, marker="o")plt.title("Training Loss")plt.xlabel("Epoch")plt.ylabel("Loss")plt.grid(True)plt.show()'''21 may RESULTS in 21_optimiAtion_ternary.docs'''#=================================#=================================#================================='''      Comparison Among all '''#=================================#=================================#================================='''Model	BP	epoch	learning rate	meta data	Test accuracyANN	Normal	100	0.001		97.91%ANN	Normal	100	0.0001		98%ANN	Normal	199	0.01		68.82%TNN	Without	100	1.00E-04	without BP	11.35%TNN	STE	100	1.00E-04		93.50%TNN	Clipped STE	100	1.00E-04		93.50%TNN	Scaled STE	100	1.00E-04	scale=0.5	93.67%TNN	Scaled STE	100	1.00E-04	scale=0.3	92.39%TNN	Scaled STE	100	1.00E-04	scale=0.7	94.36%TNN	Scaled STE	100	1.00E-04	scale=0.9	92.34%TNN	Scaled STE	100	1.00E-04	scale=0.6	93.36%TNN	Scaled STE	100	1.00E-04	scale=0.65	91.54%TNN	Scaled STE	100	1.00E-04	scale=0.75	94.06%TNN	Scaled STE	100	1.00E-04	scale=0.8	92.92%TNN	Bi-Real style triangular surrogate	100	1.00E-04		93.24%TNN	Tanh/IR-Net style surrogate	100	1.00E-04	beta=2	93.04%TNN	Tanh/IR-Net style surrogate	100	1.00E-04	beta=1	92.67%TNN	Tanh/IR-Net style surrogate	100	1.00E-04	beta=3	92.25%TNN	threshold-window surrogate	100	1.00E-04	width=0.3	93.50%TNN	threshold-window surrogate	100	1.00E-04	width=0.5	93.50%TNN	threshold-window surrogate	100	1.00E-04	width=0.7	93.50%TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.5	92.77%TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.3	93.24%TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.7	93.78%TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.6	93.51%TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.8	93.22%TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.9	93.02%'''# ============================================#  TNN comparison plots (final test accuracy)# ============================================import osimport randomimport numpy as npimport torchimport torch.nn as nnimport torch.nn.functional as Ffrom torchvision import datasets, transformsfrom torch.utils.data import DataLoaderimport matplotlib.pyplot as pltfrom pathlib import Pathtry:    _PROJECT_DIR = Path(__file__).resolve().parentexcept NameError:    # Jupyter / interactive cells do not define __file__    _PROJECT_DIR = Path.cwd()RESULTS_DIR = _PROJECT_DIR / "figures" / "tnn_comparison"ANN_BEST = 98.00  # full-precision ANN baseline (lr = 1e-4)ACC_YMAX = 100  # cap y-axis at full accuracy (%); minimum auto-scaled from dataFIG1_YMIN = 80  # figure 1 only — zoom in so bar differences are visible# Parsed from results table aboveTNN_RESULTS = [    {"family": "Baseline", "label": "Without BP", "bp": "Without", "meta": "without BP", "acc": 11.35},    {"family": "STE", "label": "STE", "bp": "STE", "meta": "", "acc": 93.50},    {"family": "STE", "label": "Clipped STE", "bp": "Clipped STE", "meta": "", "acc": 93.50},    {"family": "Scaled STE", "label": "scale=0.5", "bp": "Scaled STE", "meta": "scale=0.5", "acc": 93.67},    {"family": "Scaled STE", "label": "scale=0.3", "bp": "Scaled STE", "meta": "scale=0.3", "acc": 92.39},    {"family": "Scaled STE", "label": "scale=0.7", "bp": "Scaled STE", "meta": "scale=0.7", "acc": 94.36},    {"family": "Scaled STE", "label": "scale=0.9", "bp": "Scaled STE", "meta": "scale=0.9", "acc": 92.34},    {"family": "Scaled STE", "label": "scale=0.6", "bp": "Scaled STE", "meta": "scale=0.6", "acc": 93.36},    {"family": "Scaled STE", "label": "scale=0.65", "bp": "Scaled STE", "meta": "scale=0.65", "acc": 91.54},    {"family": "Scaled STE", "label": "scale=0.75", "bp": "Scaled STE", "meta": "scale=0.75", "acc": 94.06},    {"family": "Scaled STE", "label": "scale=0.8", "bp": "Scaled STE", "meta": "scale=0.8", "acc": 92.92},    {"family": "Bi-Real", "label": "Bi-Real triangular", "bp": "Bi-Real style triangular surrogate", "meta": "", "acc": 93.24},    {"family": "Tanh/IR-Net", "label": "beta=2", "bp": "Tanh/IR-Net style surrogate", "meta": "beta=2", "acc": 93.04},    {"family": "Tanh/IR-Net", "label": "beta=1", "bp": "Tanh/IR-Net style surrogate", "meta": "beta=1", "acc": 92.67},    {"family": "Tanh/IR-Net", "label": "beta=3", "bp": "Tanh/IR-Net style surrogate", "meta": "beta=3", "acc": 92.25},    {"family": "Threshold-window", "label": "width=0.3", "bp": "threshold-window surrogate", "meta": "width=0.3", "acc": 93.50},    {"family": "Threshold-window", "label": "width=0.5", "bp": "threshold-window surrogate", "meta": "width=0.5", "acc": 93.50},    {"family": "Threshold-window", "label": "width=0.7", "bp": "threshold-window surrogate", "meta": "width=0.7", "acc": 93.50},    {"family": "Smooth threshold-window", "label": "width=0.5", "bp": "Smooth threshold-window surrogate", "meta": "width=0.5", "acc": 92.77},    {"family": "Smooth threshold-window", "label": "width=0.3", "bp": "Smooth threshold-window surrogate", "meta": "width=0.3", "acc": 93.24},    {"family": "Smooth threshold-window", "label": "width=0.7", "bp": "Smooth threshold-window surrogate", "meta": "width=0.7", "acc": 93.78},    {"family": "Smooth threshold-window", "label": "width=0.6", "bp": "Smooth threshold-window surrogate", "meta": "width=0.6", "acc": 93.51},    {"family": "Smooth threshold-window", "label": "width=0.8", "bp": "Smooth threshold-window surrogate", "meta": "width=0.8", "acc": 93.22},    {"family": "Smooth threshold-window", "label": "width=0.9", "bp": "Smooth threshold-window surrogate", "meta": "width=0.9", "acc": 93.02},]# ColorBrewer / Okabe–Ito inspired — colorblind-friendly, print-safeFAMILY_COLORS = {    "Baseline": "#6E6E6E",    "STE": "#0C5DA5",    "Scaled STE": "#944C00",    "Bi-Real": "#1B7F3B",    "Tanh/IR-Net": "#6B4C9A",    "Threshold-window": "#3A6EA8",    "Smooth threshold-window": "#A63D40",}ANN_LINE_COLOR = "#404040"FIGURE_DPI = 200          # on-screen / notebook previewSAVEFIG_DPI = 600         # publication-quality exportBAR_EDGE = "#2D2D2D"BAR_ALPHA = 0.92def _setup_academic_style():    """Matplotlib rcParams for thesis / journal figures."""    plt.rcParams.update({        "font.family": "serif",        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],        "mathtext.fontset": "dejavuserif",        "font.size": 11,        "axes.titlesize": 12,        "axes.labelsize": 11,        "xtick.labelsize": 9,        "ytick.labelsize": 9,        "legend.fontsize": 9,        "axes.titleweight": "normal",        "axes.labelweight": "normal",        "axes.linewidth": 0.9,        "axes.edgecolor": "#2D2D2D",        "axes.facecolor": "white",        "figure.facecolor": "white",        "figure.dpi": FIGURE_DPI,        "savefig.dpi": SAVEFIG_DPI,        "savefig.bbox": "tight",        "savefig.pad_inches": 0.05,        "savefig.facecolor": "white",        "savefig.edgecolor": "none",        "grid.color": "#C8C8C8",        "grid.linestyle": "-",        "grid.linewidth": 0.5,        "grid.alpha": 0.55,        "lines.linewidth": 1.8,        "lines.markersize": 7,        "xtick.direction": "out",        "ytick.direction": "out",        "xtick.major.size": 4,        "ytick.major.size": 4,        "legend.frameon": True,        "legend.framealpha": 1.0,        "legend.edgecolor": "#B0B0B0",        "legend.fancybox": False,    })def _style_axes(ax, title, ylabel="Test accuracy (%)"):    ax.set_title(title, pad=12)    ax.set_ylabel(ylabel)    ax.grid(True, axis="y", zorder=0)    ax.set_axisbelow(True)    ax.spines["top"].set_visible(False)    ax.spines["right"].set_visible(False)    ax.spines["left"].set_color("#2D2D2D")    ax.spines["bottom"].set_color("#2D2D2D")def _style_legend(ax, loc="best"):    leg = ax.legend(loc=loc, borderpad=0.6, handlelength=2.2)    if leg:        leg.get_frame().set_linewidth(0.6)    return legdef _set_accuracy_ylim(ax, ymax=ACC_YMAX):    ax.set_ylim(top=ymax)def _add_ann_reference(ax):    ax.axhline(        ANN_BEST,        color=ANN_LINE_COLOR,        linestyle=(0, (6, 4)),        linewidth=1.1,        label="ANN best (98.0%)",        zorder=4,    )    _set_accuracy_ylim(ax)def _parse_param(meta, key):    if not meta or f"{key}=" not in meta:        return None    return float(meta.split(f"{key}=")[1])def _save_figure(fig, save_dir, stem):    save_dir = Path(save_dir)    if SAVE_FIGS:        fig.savefig(save_dir / f"{stem}.png", dpi=SAVEFIG_DPI)        fig.savefig(save_dir / f"{stem}.pdf")def _bar_kwargs():    return dict(edgecolor=BAR_EDGE, linewidth=0.55, alpha=BAR_ALPHA, zorder=3)def _line_kwargs(color, marker):    return dict(        color=color,        marker=marker,        linestyle="-",        linewidth=1.9,        markersize=7.5,        markerfacecolor="white",        markeredgewidth=1.2,        markeredgecolor=color,        zorder=4,    )def plot_tnn_comparisons(save_dir=RESULTS_DIR, show=True):    save_dir = Path(save_dir)    save_dir.mkdir(parents=True, exist_ok=True)    _setup_academic_style()    trained = [r for r in TNN_RESULTS if r["family"] != "Baseline"]    trained_sorted = sorted(trained, key=lambda r: r["acc"], reverse=True)    # Figure 1: overview (all trained TNN variants)    fig1, ax1 = plt.subplots(figsize=(12, 5.5), dpi=FIGURE_DPI)    labels = [f"{r['family']}\n{r['label']}" if r["label"] != r["family"] else r["family"] for r in trained_sorted]    colors = [FAMILY_COLORS[r["family"]] for r in trained_sorted]    y = [r["acc"] for r in trained_sorted]    xpos = np.arange(len(y))    bars = ax1.bar(xpos, y, color=colors, width=0.72, **_bar_kwargs())    ax1.set_xticks(xpos)    ax1.set_xticklabels(labels, rotation=55, ha="right", fontsize=8)    _add_ann_reference(ax1)    ax1.set_ylim(bottom=FIG1_YMIN, top=ACC_YMAX)    best_idx = y.index(max(y))    bars[best_idx].set_edgecolor("#000000")    bars[best_idx].set_linewidth(1.15)    bars[best_idx].set_alpha(1.0)    ax1.text(        best_idx, y[best_idx] + 0.12, f"{y[best_idx]:.2f}%",        ha="center", fontsize=8, fontweight="semibold", color="#1A1A1A",    )    _style_axes(ax1, "TNN surrogate comparison: test accuracy (100 epochs, lr = $10^{-4}$)")    _style_legend(ax1, loc="upper left")    fig1.tight_layout()    _save_figure(fig1, save_dir, "01_tnn_overview_all_variants")    # Figure 2: best per surrogate family    families = []    bests = []    for fam in ["Baseline", "STE", "Scaled STE", "Bi-Real", "Tanh/IR-Net", "Threshold-window", "Smooth threshold-window"]:        subset = [r for r in TNN_RESULTS if r["family"] == fam]        if subset:            families.append(fam)            bests.append(max(r["acc"] for r in subset))    fig2, ax2 = plt.subplots(figsize=(9, 5), dpi=FIGURE_DPI)    x = np.arange(len(families))    ax2.bar(x, bests, color=[FAMILY_COLORS[f] for f in families], width=0.68, **_bar_kwargs())    ax2.set_xticks(x)    ax2.set_xticklabels(families, rotation=28, ha="right", fontsize=9)    for i, v in enumerate(bests):        ax2.text(i, v + 0.35, f"{v:.2f}%", ha="center", fontsize=9, color="#1A1A1A")    _add_ann_reference(ax2)    _style_axes(ax2, "Best test accuracy per surrogate family")    _style_legend(ax2, loc="upper left")    fig2.tight_layout()    _save_figure(fig2, save_dir, "02_tnn_best_per_family")    def _param_curve(family, param_key, title, stem, legend_loc="lower center"):        rows = [r for r in TNN_RESULTS if r["family"] == family]        pts = []        for r in rows:            val = _parse_param(r["meta"], param_key)            if val is not None:                pts.append((val, r["acc"]))        if not pts:            return        pts.sort(key=lambda t: t[0])        xs, ys = zip(*pts)        color = FAMILY_COLORS[family]        fig, ax = plt.subplots(figsize=(7, 4.5), dpi=FIGURE_DPI)        ax.plot(xs, ys, label=family, **_line_kwargs(color, "o"))        for xv, yv in zip(xs, ys):            ax.annotate(                f"{yv:.2f}%", (xv, yv),                textcoords="offset points", xytext=(0, 7),                ha="center", fontsize=8, color="#1A1A1A",            )        _add_ann_reference(ax)        ax.set_xlabel(param_key)        _style_axes(ax, title)        _style_legend(ax, loc=legend_loc)        fig.tight_layout()        _save_figure(fig, save_dir, stem)    # Figures 3–6: hyperparameter sweep curves    _param_curve("Scaled STE", "scale", "Scaled STE: accuracy vs scale factor", "03_scaled_ste_vs_scale", legend_loc="upper right")    _param_curve("Tanh/IR-Net", "beta", "Tanh/IR-Net surrogate: accuracy vs $\\beta$", "04_tanh_beta_vs_accuracy", legend_loc="upper right")    _param_curve("Threshold-window", "width", "Threshold-window surrogate: accuracy vs width", "05_threshold_window_vs_width")    _param_curve(        "Smooth threshold-window", "width",        "Smooth threshold-window surrogate: accuracy vs width",        "06_smooth_threshold_window_vs_width",        legend_loc="upper right",    )    # Figure 7: STE variants    ste_rows = [r for r in TNN_RESULTS if r["family"] == "STE"]    fig7, ax7 = plt.subplots(figsize=(6, 4.5), dpi=FIGURE_DPI)    x7 = np.arange(len(ste_rows))    ax7.bar(        x7, [r["acc"] for r in ste_rows],        color=FAMILY_COLORS["STE"], width=0.55, **_bar_kwargs(),    )    ax7.set_xticks(x7)    ax7.set_xticklabels([r["label"] for r in ste_rows], fontsize=10)    _add_ann_reference(ax7)    _style_axes(ax7, "Plain vs clipped STE")    _style_legend(ax7, loc="lower right")    fig7.tight_layout()    _save_figure(fig7, save_dir, "07_ste_variants")    # Figure 8: hard vs smooth threshold-window    hard = {_parse_param(r["meta"], "width"): r["acc"] for r in TNN_RESULTS if r["family"] == "Threshold-window"}    smooth = {_parse_param(r["meta"], "width"): r["acc"] for r in TNN_RESULTS if r["family"] == "Smooth threshold-window"}    fig8, ax8 = plt.subplots(figsize=(7.5, 4.5), dpi=FIGURE_DPI)    hard_w = sorted(hard)    smooth_w = sorted(smooth)    ax8.plot(        hard_w, [hard[w] for w in hard_w],        label="Hard threshold-window",        **_line_kwargs(FAMILY_COLORS["Threshold-window"], "s"),    )    ax8.plot(        smooth_w, [smooth[w] for w in smooth_w],        label="Smooth threshold-window",        **_line_kwargs(FAMILY_COLORS["Smooth threshold-window"], "o"),    )    _add_ann_reference(ax8)    ax8.set_xlabel("width")    _style_axes(ax8, "Hard vs smooth threshold-window surrogates")    _style_legend(ax8, loc="upper right")    fig8.tight_layout()    _save_figure(fig8, save_dir, "08_hard_vs_smooth_threshold_window")    # Figure 9: gap to ANN best    fig9, ax9 = plt.subplots(figsize=(12, 4.5), dpi=FIGURE_DPI)    gap = [ANN_BEST - r["acc"] for r in trained_sorted]    x9 = np.arange(len(gap))    ax9.bar(        x9, gap,        color=[FAMILY_COLORS[r["family"]] for r in trained_sorted],        width=0.72, **_bar_kwargs(),    )    ax9.set_xticks(x9)    ax9.set_xticklabels([r["label"] for r in trained_sorted], rotation=55, ha="right", fontsize=8)    ax9.axhline(0, color="#2D2D2D", linewidth=0.9, zorder=4)    _style_axes(ax9, "Accuracy gap vs full-precision ANN (98.0%)", ylabel="Gap to ANN best (percentage points)")    fig9.tight_layout()    _save_figure(fig9, save_dir, "09_gap_to_ann_best")    if show:        plt.show()    else:        plt.close("all")    print(f"TNN comparison figures saved ({SAVEFIG_DPI} dpi PNG + vector PDF):\n  {save_dir}")    return save_dir# Set True to generate comparison figures (no extra files needed)RUN_COMPARISON_PLOTS = Trueif RUN_COMPARISON_PLOTS:    plot_tnn_comparisons(show=True)#====================================================#====================================================#===================================================='''     Comparison top 3 candidates  '''#====================================================#====================================================#===================================================='''Top-3 TNN candidates â€” joint training and in-depth comparison.Candidates (from surrogate sweep):  - Scaled STE, scale = 0.7  - Scaled STE, scale = 0.75  - Smooth threshold-window, width = 0.7Training: 100 epochs, Adam lr = 1e-4, MNIST, seed = 42.'''BATCH_SIZE = batch_sizeTHRESHOLD = 0.05LEARNING_RATE = learning_rateNUM_EPOCHS = num_epochstry:    _PROJECT_DIR = Path(__file__).resolve().parentexcept NameError:    _PROJECT_DIR = Path.cwd()FIGURES_DIR = _PROJECT_DIR / "figures" / "tnn_top3_candidates"CHECKPOINT_DIR = _PROJECT_DIR / "checkpoints" / "tnn_top3_candidates"# ============================================# Top-3 candidates# ============================================TOP_CANDIDATES = [    {        "id": "scaled_ste_0.7",        "label": "Scaled STE ($s=0.7$)",        "short": "Scaled STE 0.7",        "surrogate": "scaled_ste",        "scale": 0.7,        "width": None,        "ref_acc": 94.36,    },    {        "id": "scaled_ste_0.75",        "label": "Scaled STE ($s=0.75$)",        "short": "Scaled STE 0.75",        "surrogate": "scaled_ste",        "scale": 0.75,        "width": None,        "ref_acc": 94.06,    },    {        "id": "smooth_tw_0.7",        "label": "Smooth threshold-window ($w=0.7$)",        "short": "Smooth TW 0.7",        "surrogate": "smooth_threshold_window",        "scale": None,        "width": 0.7,        "ref_acc": 93.78,    },]CANDIDATE_COLORS = {    "scaled_ste_0.7": "#0C5DA5",    "scaled_ste_0.75": "#944C00",    "smooth_tw_0.7": "#1B7F3B",}ANN_BEST = 98.0ACC_YMAX = 100FIGURE_DPI = 200SAVEFIG_DPI = 600def set_seed(seed=SEED):    random.seed(seed)    np.random.seed(seed)    torch.manual_seed(seed)    torch.cuda.manual_seed(seed)    torch.cuda.manual_seed_all(seed)    torch.backends.cudnn.deterministic = True    torch.backends.cudnn.benchmark = False    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")    torch.use_deterministic_algorithms(True, warn_only=True)# ============================================# 1) Data# ============================================transform = transforms.Compose([    transforms.ToTensor(),    transforms.Normalize((0.1307,), (0.3081,)),    transforms.Lambda(lambda x: x.view(-1)),])train_dataset = datasets.MNIST(root="./data", train=True, transform=transform, download=True)test_dataset = datasets.MNIST(root="./data", train=False, transform=transform, download=True)train_generator = torch.Generator().manual_seed(SEED)train_loader = DataLoader(    train_dataset, batch_size=BATCH_SIZE, shuffle=True, generator=train_generator,)test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)# ============================================# 2) Ternary layers with selectable surrogate# ============================================class TernaryWeightFunction(torch.autograd.Function):    @staticmethod    def forward(ctx, weight, threshold, surrogate, scale, width):        ctx.save_for_backward(weight)        ctx.threshold = threshold        ctx.surrogate = surrogate        ctx.scale = scale        ctx.width = width        return torch.where(            weight > threshold,            torch.ones_like(weight),            torch.where(weight < -threshold, -torch.ones_like(weight), torch.zeros_like(weight)),        )    @staticmethod    def backward(ctx, grad_output):        weight, = ctx.saved_tensors        surrogate = ctx.surrogate        scale = ctx.scale        width = ctx.width        threshold = ctx.threshold        if surrogate == "scaled_ste":            grad_weight = grad_output.clone() * scale        elif surrogate == "smooth_threshold_window":            dist_pos = (weight - threshold).abs()            dist_neg = (weight + threshold).abs()            grad_pos = torch.clamp(1.0 - dist_pos / width, min=0.0)            grad_neg = torch.clamp(1.0 - dist_neg / width, min=0.0)            grad_surrogate = torch.maximum(grad_pos, grad_neg)            grad_weight = grad_output * grad_surrogate        else:            raise ValueError(f"Unknown surrogate: {surrogate}")        return grad_weight, None, None, None, Noneclass TernaryLinear(nn.Linear):    def __init__(self, in_features, out_features, bias=True, threshold=THRESHOLD, surrogate_cfg=None):        super().__init__(in_features, out_features, bias)        self.threshold = threshold        self.surrogate_cfg = surrogate_cfg or {}    def ternary_weight(self):        cfg = self.surrogate_cfg        return TernaryWeightFunction.apply(            self.weight,            self.threshold,            cfg["surrogate"],            cfg.get("scale", 1.0),            cfg.get("width", 0.7),        )    def forward(self, input):        return F.linear(input, self.ternary_weight(), self.bias)class TernaryMNIST(nn.Module):    def __init__(self, surrogate_cfg):        super().__init__()        self.surrogate_cfg = surrogate_cfg        self.fc1 = TernaryLinear(784, 256, threshold=THRESHOLD, surrogate_cfg=surrogate_cfg)        self.fc2 = TernaryLinear(256, 128, threshold=THRESHOLD, surrogate_cfg=surrogate_cfg)        self.fc3 = TernaryLinear(128, 10, threshold=THRESHOLD, surrogate_cfg=surrogate_cfg)    def forward(self, x):        x = x.view(x.size(0), -1)        x = F.relu(self.fc1(x))        x = F.relu(self.fc2(x))        return self.fc3(x)    def layer_modules(self):        return {"fc1": self.fc1, "fc2": self.fc2, "fc3": self.fc3}def _surrogate_cfg_from_candidate(candidate):    cfg = {"surrogate": candidate["surrogate"]}    if candidate["surrogate"] == "scaled_ste":        cfg["scale"] = candidate["scale"]        cfg["width"] = 0.7    else:        cfg["scale"] = 1.0        cfg["width"] = candidate["width"]    return cfg# ============================================# 3) Train / evaluate# ============================================def _accuracy(model, loader, device):    model.eval()    correct = total = 0    with torch.no_grad():        for images, labels in loader:            images, labels = images.to(device), labels.to(device)            preds = model(images).argmax(dim=1)            correct += (preds == labels).sum().item()            total += labels.size(0)    return 100.0 * correct / totaldef train_candidate(candidate, device=None, verbose=True):    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")    set_seed(SEED)    surrogate_cfg = _surrogate_cfg_from_candidate(candidate)    model = TernaryMNIST(surrogate_cfg).to(device)    criterion = nn.CrossEntropyLoss()    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)    history = {        "candidate": candidate,        "train_loss": [],        "train_acc": [],        "test_acc": [],    }    for epoch in range(NUM_EPOCHS):        model.train()        running_loss = 0.0        correct = total = 0        for images, labels in train_loader:            images, labels = images.to(device), labels.to(device)            outputs = model(images)            loss = criterion(outputs, labels)            optimizer.zero_grad()            loss.backward()            optimizer.step()            running_loss += loss.item()            preds = outputs.argmax(dim=1)            correct += (preds == labels).sum().item()            total += labels.size(0)        avg_loss = running_loss / len(train_loader)        train_acc = 100.0 * correct / total        test_acc = _accuracy(model, test_loader, device)        history["train_loss"].append(avg_loss)        history["train_acc"].append(train_acc)        history["test_acc"].append(test_acc)        if verbose:            print(                f"[{candidate['short']}] Epoch {epoch + 1}/{NUM_EPOCHS} | "                f"loss={avg_loss:.4f} | train_acc={train_acc:.2f}% | test_acc={test_acc:.2f}%"            )    history["final_test_acc"] = history["test_acc"][-1]    history["model"] = model    history["state_dict"] = {k: v.cpu().clone() for k, v in model.state_dict().items()}    return historydef collect_weight_stats(model):    """Per-layer latent weights and ternary {-1,0,+1} composition."""    stats = {}    for name, layer in model.layer_modules().items():        w = layer.weight.detach().cpu().numpy().ravel()        t = layer.ternary_weight().detach().cpu().numpy().ravel()        stats[name] = {            "latent": w,            "ternary": t,            "counts": {                -1: int((t == -1).sum()),                0: int((t == 0).sum()),                1: int((t == 1).sum()),            },            "shape": tuple(layer.weight.shape),        }    return stats# ============================================# 4) Academic plotting# ============================================def _setup_academic_style():    plt.rcParams.update({        "font.family": "serif",        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],        "mathtext.fontset": "dejavuserif",        "font.size": 11,        "axes.titlesize": 12,        "axes.labelsize": 11,        "xtick.labelsize": 9,        "ytick.labelsize": 9,        "legend.fontsize": 9,        "axes.linewidth": 0.9,        "axes.edgecolor": "#2D2D2D",        "figure.facecolor": "white",        "axes.facecolor": "white",        "figure.dpi": FIGURE_DPI,        "savefig.dpi": SAVEFIG_DPI,        "savefig.bbox": "tight",        "savefig.pad_inches": 0.05,        "grid.color": "#C8C8C8",        "grid.linewidth": 0.5,        "grid.alpha": 0.55,        "legend.frameon": True,        "legend.fancybox": False,        "legend.edgecolor": "#B0B0B0",    })def _style_axes(ax, title, ylabel=None, xlabel=None):    ax.set_title(title, pad=12)    if ylabel:        ax.set_ylabel(ylabel)    if xlabel:        ax.set_xlabel(xlabel)    ax.grid(True, axis="y", zorder=0)    ax.set_axisbelow(True)    ax.spines["top"].set_visible(False)    ax.spines["right"].set_visible(False)def _legend(ax, loc="upper left"):    leg = ax.legend(loc=loc, borderpad=0.6, handlelength=2.4)    if leg:        leg.get_frame().set_linewidth(0.6)    return legdef _save_fig(fig, stem):    FIGURES_DIR.mkdir(parents=True, exist_ok=True)    if SAVE_FIGS:        fig.savefig(FIGURES_DIR / f"{stem}.png", dpi=SAVEFIG_DPI)        fig.savefig(FIGURES_DIR / f"{stem}.pdf")def _line_style(cid):    return dict(        color=CANDIDATE_COLORS[cid],        linewidth=1.9,        marker="o",        markersize=4.5,        markevery=5,        markerfacecolor="white",        markeredgewidth=1.0,        markeredgecolor=CANDIDATE_COLORS[cid],    )def plot_all_comparisons(results):    _setup_academic_style()    epochs = np.arange(1, NUM_EPOCHS + 1)    # --- 1) Training loss ---    fig, ax = plt.subplots(figsize=(8, 4.8), dpi=FIGURE_DPI)    for res in results:        cid = res["candidate"]["id"]        ax.plot(epochs, res["train_loss"], label=res["candidate"]["label"], **_line_style(cid))    _style_axes(ax, "Training loss (top-3 TNN surrogates)", ylabel="Cross-entropy loss", xlabel="Epoch")    _legend(ax, "upper right")    fig.tight_layout()    _save_fig(fig, "01_train_loss_curves")    plt.close(fig)    # --- 2) Test accuracy ---    fig, ax = plt.subplots(figsize=(8, 4.8), dpi=FIGURE_DPI)    for res in results:        cid = res["candidate"]["id"]        ax.plot(epochs, res["test_acc"], label=res["candidate"]["label"], **_line_style(cid))    ax.axhline(ANN_BEST, color="#404040", linestyle=(0, (6, 4)), linewidth=1.1, label="ANN best (98.0%)", zorder=5)    ax.set_ylim(top=ACC_YMAX)    _style_axes(ax, "Test accuracy during training", ylabel="Test accuracy (%)", xlabel="Epoch")    _legend(ax, "lower right")    fig.tight_layout()    _save_fig(fig, "02_test_accuracy_curves")    plt.close(fig)    # --- 3) Train accuracy ---    fig, ax = plt.subplots(figsize=(8, 4.8), dpi=FIGURE_DPI)    for res in results:        cid = res["candidate"]["id"]        ax.plot(epochs, res["train_acc"], label=res["candidate"]["label"], **_line_style(cid))    ax.set_ylim(top=ACC_YMAX)    _style_axes(ax, "Training accuracy during training", ylabel="Train accuracy (%)", xlabel="Epoch")    _legend(ax, "lower right")    fig.tight_layout()    _save_fig(fig, "03_train_accuracy_curves")    plt.close(fig)    # --- 4) Loss + test accuracy (dual axis style: two panels) ---    fig, (ax_l, ax_a) = plt.subplots(2, 1, figsize=(8, 7.2), dpi=FIGURE_DPI, sharex=True)    for res in results:        cid = res["candidate"]["id"]        ax_l.plot(epochs, res["train_loss"], label=res["candidate"]["short"], **_line_style(cid))        ax_a.plot(epochs, res["test_acc"], label=res["candidate"]["short"], **_line_style(cid))    ax_a.axhline(ANN_BEST, color="#404040", linestyle=(0, (6, 4)), linewidth=1.1, zorder=5)    ax_a.set_ylim(top=ACC_YMAX)    _style_axes(ax_l, "Top-3 TNN candidates: loss and test accuracy", ylabel="Train loss")    _style_axes(ax_a, None, ylabel="Test accuracy (%)", xlabel="Epoch")    ax_l.legend(loc="upper right", frameon=True, fontsize=9)    fig.tight_layout()    _save_fig(fig, "04_loss_and_test_accuracy_panels")    plt.close(fig)    # --- 5) Final test accuracy bar chart ---    fig, ax = plt.subplots(figsize=(7, 4.5), dpi=FIGURE_DPI)    labels = [r["candidate"]["short"] for r in results]    accs = [r["final_test_acc"] for r in results]    colors = [CANDIDATE_COLORS[r["candidate"]["id"]] for r in results]    x = np.arange(len(labels))    bars = ax.bar(x, accs, color=colors, width=0.6, edgecolor="#2D2D2D", linewidth=0.55, alpha=0.92)    ax.set_xticks(x)    ax.set_xticklabels(labels, fontsize=10)    for i, v in enumerate(accs):        ax.text(i, v + 0.35, f"{v:.2f}%", ha="center", fontsize=9)    ax.axhline(ANN_BEST, color="#404040", linestyle=(0, (6, 4)), linewidth=1.1, label="ANN best (98.0%)")    ax.set_ylim(top=ACC_YMAX)    _style_axes(ax, f"Final test accuracy after {NUM_EPOCHS} epochs", ylabel="Test accuracy (%)")    _legend(ax, "upper left")    best_i = int(np.argmax(accs))    bars[best_i].set_edgecolor("#000000")    bars[best_i].set_linewidth(1.1)    fig.tight_layout()    _save_fig(fig, "05_final_test_accuracy")    plt.close(fig)    # --- 6â€“8) Per-layer latent weight histograms (one figure per layer) ---    layer_names = ["fc1", "fc2", "fc3"]    layer_titles = ["FC1 (784$\\rightarrow$256)", "FC2 (256$\\rightarrow$128)", "FC3 (128$\\rightarrow$10)"]    bins = np.linspace(-1.5, 1.5, 60)    for layer, title in zip(layer_names, layer_titles):        fig, ax = plt.subplots(figsize=(8, 4.5), dpi=FIGURE_DPI)        for res in results:            cid = res["candidate"]["id"]            w = res["weight_stats"][layer]["latent"]            ax.hist(                w, bins=bins, density=True, histtype="step", linewidth=1.6,                label=res["candidate"]["short"], color=CANDIDATE_COLORS[cid],            )        _style_axes(ax, f"Latent weight distribution â€” {title}", ylabel="Density", xlabel="Latent weight value")        _legend(ax, "upper right")        fig.tight_layout()        _save_fig(fig, f"06_latent_weights_{layer}")        plt.close(fig)    # --- 9â€“11) Per-layer ternary weight histograms ---    ternary_bins = [-1.5, -0.5, 0.5, 1.5]    for layer, title in zip(layer_names, layer_titles):        fig, ax = plt.subplots(figsize=(8, 4.5), dpi=FIGURE_DPI)        for res in results:            cid = res["candidate"]["id"]            t = res["weight_stats"][layer]["ternary"]            ax.hist(                t, bins=ternary_bins, density=True, histtype="step", linewidth=1.8,                label=res["candidate"]["short"], color=CANDIDATE_COLORS[cid],            )        _style_axes(ax, f"Ternary weight distribution ($\\{{-1,0,+1\\}}$) â€” {title}", ylabel="Density", xlabel="Ternary weight")        _legend(ax, "upper right")        fig.tight_layout()        _save_fig(fig, f"07_ternary_weights_{layer}")        plt.close(fig)    # --- 12) Ternary composition stacked bars per layer ---    fig, axes = plt.subplots(1, 3, figsize=(12, 4.2), dpi=FIGURE_DPI, sharey=True)    x_labels = [r["candidate"]["short"] for r in results]    x = np.arange(len(x_labels))    width = 0.72    ternary_labels = ["$-1$", "$0$", "$+1$"]    stack_colors = ["#4A6FA5", "#B0B0B0", "#A63D40"]    for ax, layer, title in zip(axes, layer_names, ["FC1", "FC2", "FC3"]):        bottom = np.zeros(len(results))        for tval, tcolor, tlab in zip([-1, 0, 1], stack_colors, ternary_labels):            vals = []            for res in results:                c = res["weight_stats"][layer]["counts"]                total = sum(c.values())                vals.append(100.0 * c[tval] / total)            vals = np.array(vals)            ax.bar(x, vals, width, bottom=bottom, label=tlab, color=tcolor, edgecolor="#2D2D2D", linewidth=0.35)            bottom += vals        ax.set_xticks(x)        ax.set_xticklabels(x_labels, rotation=15, ha="right", fontsize=8)        ax.set_title(title, fontsize=11)        ax.set_ylim(0, 100)        ax.grid(True, axis="y", alpha=0.4)        ax.spines["top"].set_visible(False)        ax.spines["right"].set_visible(False)    axes[0].set_ylabel("Share of weights (%)")    fig.suptitle("Ternary weight composition per layer (top-3 candidates)", fontsize=12, y=1.02)    handles, labels_leg = axes[2].get_legend_handles_labels()    fig.legend(handles, labels_leg, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.08), frameon=True)    fig.tight_layout()    _save_fig(fig, "08_ternary_composition_per_layer")    plt.close(fig)    # --- 13) All layers latent weights â€” small multiples per candidate ---    fig, axes = plt.subplots(len(results), 3, figsize=(12, 3.2 * len(results)), dpi=FIGURE_DPI)    if len(results) == 1:        axes = np.array([axes])    for row, res in enumerate(results):        cid = res["candidate"]["id"]        for col, layer in enumerate(layer_names):            ax = axes[row, col]            w = res["weight_stats"][layer]["latent"]            ax.hist(w, bins=bins, color=CANDIDATE_COLORS[cid], alpha=0.75, edgecolor="#2D2D2D", linewidth=0.3)            ax.set_title(f"{res['candidate']['short']} â€” {layer}", fontsize=9)            ax.grid(True, axis="y", alpha=0.35)            ax.spines["top"].set_visible(False)            ax.spines["right"].set_visible(False)            if col == 0:                ax.set_ylabel("Count")            if row == len(results) - 1:                ax.set_xlabel("Latent weight")    fig.suptitle("Latent weight distributions (all layers)", fontsize=12, y=1.01)    fig.tight_layout()    _save_fig(fig, "09_latent_weights_grid")    plt.close(fig)    print(f"\nAll comparison figures saved to:\n  {FIGURES_DIR}")# ============================================# 5) Main# ============================================def run_top3_comparison(show_plots=True, save_checkpoints=True):    set_seed(SEED)    print(f"Random seed: {SEED}")    print(f"Training {len(TOP_CANDIDATES)} candidates | {NUM_EPOCHS} epochs | lr={LEARNING_RATE}\n")    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")    print(f"Device: {device}\n")    results = []    for candidate in TOP_CANDIDATES:        print("=" * 60)        history = train_candidate(candidate, device=device)        history["weight_stats"] = collect_weight_stats(history["model"])        results.append(history)        if save_checkpoints:            CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)            path = CHECKPOINT_DIR / f"{candidate['id']}.pt"            torch.save(                {                    "candidate": candidate,                    "state_dict": history["state_dict"],                    "train_loss": history["train_loss"],                    "train_acc": history["train_acc"],                    "test_acc": history["test_acc"],                    "final_test_acc": history["final_test_acc"],                },                path,            )            print(f"Checkpoint saved: {path}\n")    print("=" * 60)    print("Final test accuracy summary:")    for res in results:        c = res["candidate"]        print(f"  {c['short']:20s}  {res['final_test_acc']:.2f}%  (reference sweep: {c['ref_acc']:.2f}%)")    plot_all_comparisons(results)    if show_plots:        plt.show()    else:        plt.close("all")    return resultsRUN_TOP3_COMPARISON = Trueif RUN_TOP3_COMPARISON:    all_results = run_top3_comparison(show_plots=True, save_checkpoints=True)                '''The comparative evaluation of the three ternary surrogate gradient approaches demonstrates that all candidates were capable of successfully training the TNN architecture, achieving final test accuracies above 91%. However, clear  differences emerged in convergence stability, optimization behavior, and  latent weight organization. Among the evaluated methods, the smooth  threshold-window surrogate with w=0.7 consistently exhibited the most balanced overall performance. Although the scaled STE with s=0.7 occasionally  achieved slightly higher instantaneous test accuracy peaks, the smooth  threshold-window approach provided more stable learning dynamics throughout training, with reduced oscillations in both the loss and accuracy curves.  In contrast, the scaled STE with s=0.75 showed noticeably less stable optimization behavior, including larger fluctuations and intermittent  drops in test accuracy during later training epochs.The training loss analysis further supports the superiority of the smooth threshold-window surrogate. All three methods demonstrated rapid early convergence during the first several epochs, followed by gradual refinement toward lower cross-entropy loss values. Nevertheless, the smooth threshold-window approach maintained the smoothest and most monotonic loss decay across the full training duration. The scaled STE s=0.7 achieved comparable final loss values but exhibited slightly noisier optimization trajectories, suggesting less  controlled gradient propagation. The scaled STE s=0.75, on the other hand, produced the highest level of variance during training, indicating that the larger surrogate scaling factor likely introduced excessive gradient magnitude and reduced optimization stability. These observations suggest that surrogate gradient smoothness and locality around ternary transition regions play an  important role in stabilizing TNN training.The latent weight distributions also revealed important differences between the surrogate functions. Across all fully connected layers, the smooth threshold-window surrogate generated highly concentrated latent weight distributions centered near zero while still maintaining sufficient spread to support ternary quantization. This behavior indicates improved regularization  and more structured latent-space organization prior to ternary projection. The scaled STE methods produced similar overall distributions, but with  slightly broader spread and less consistent clustering near the ternary  transition boundaries. Furthermore, the ternary weight composition analysis showed that all three methods converged toward sparse ternary representations  dominated by zero-valued weights, particularly in the earlier fully connected  layers. However, the smooth threshold-window surrogate achieved this sparsity  while simultaneously preserving the most stable training behavior, suggesting improved compatibility between the surrogate gradient mechanism and  ternary-constrained optimization.From a broader neuromorphic and hardware-aware perspective, the smooth threshold-window surrogate is also the most physically meaningful candidate among the evaluated approaches. Unlike the globally scaled STE formulations, which propagate gradients uniformly through the quantization operation, the smooth threshold-window method concentrates meaningful gradient flow near the  ternary switching boundaries. This behavior more closely resembles conductance transition dynamics observed in memristive and threshold-based nanoelectronic devices, where state transitions occur primarily near switching thresholds rather than uniformly across the entire operating range. Consequently, the smooth threshold-window surrogate not only provides strong empirical performance  but also offers improved interpretability and relevance for future hardware implementation of ternary neural networks using emerging in-memory and neuromorphic computing devices. '''
+'''
+In The Name of God
+
+Ali Pilehvar Meibody
+
+Last Update : 07 sep 2026
+
+
+02_TNN_Optimization.py
+
+
+In this file  , we create our TernaryLinear , TernaryFunctions, TernaryMNIST
+and first without backpropagation which is saved as 24may_TNN_without_BP.pth
+
+Then we try different strategies for back propagations, we compare all of them
+we pick top 3 and we compare the top3 and we have tehse 3 mdoeled togethers.
+
+
+all these three models named scaled_ste_0.7.pt, scaled_ste_0.75.pt and smooth_tw_0.7.pt
+are saved in 
+Pth_Models/tnn_top3_candidates/
+
+
+'''
+
+
+
+# ============================================
+'''                   Imports              '''
+# ============================================
+import os
+import random
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+
+from paths import DATA_DIR, PROJECT_DIR, PTH_DIR
+
+
+
+
+# ============================================
+'''                Variables              '''
+# ============================================
+SEED = 42  # change this to try other runs; keep fixed for identical results
+batch_size = 16
+#learning_rate = 0.0001 #for ANN
+learning_rate=1e-4 #for TNN
+
+num_epochs = 100
+SAVE_FIGS = False
+
+
+date_name='07_sep_2026'
+
+
+
+# ============================================
+# 0) Reproducibility — fix all random sources
+# ============================================
+
+def set_seed(seed: int = SEED) -> None:
+    """Set seeds so weight init, shuffling, and training are reproducible."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    # CuDNN / CUDA: deterministic ops (relevant if you switch to GPU later)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    # PyTorch >= 1.8: stricter determinism on CUDA (no effect on pure CPU)
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
+    # Fail on known non-deterministic ops (use warn_only=True if something breaks)
+    torch.use_deterministic_algorithms(True, warn_only=True)
+
+set_seed(SEED)
+print(f"Random seed set to {SEED} (reproducible run)")
+
+
+# ============================================
+# 1) Transform MNIST
+# ============================================
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.1307,), (0.3081,)),
+    transforms.Lambda(lambda x: x.view(-1))
+])
+
+# ============================================
+# 2) Load MNIST
+# ============================================
+train_dataset = datasets.MNIST(
+    root=str(DATA_DIR),
+    train=True,
+    transform=transform,
+    download=True
+)
+
+test_dataset = datasets.MNIST(
+    root=str(DATA_DIR),
+    train=False,
+    transform=transform,
+    download=True
+)
+
+
+train_generator = torch.Generator().manual_seed(SEED)
+
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=batch_size,
+    shuffle=True,
+    generator=train_generator
+)
+
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=batch_size,
+    shuffle=False
+)
+
+
+
+
+
+
+
+######################################################################
+######################################################################
+######################################################################
+######################################################################
+'''                          TNN Without BP                         '''
+######################################################################
+######################################################################
+######################################################################
+######################################################################
+
+
+
+# ============================================
+# 3) Ternary Linear Layer
+# ============================================
+class TernaryLinear(nn.Linear):
+    def __init__(self, in_features, out_features, bias=True, threshold=0.05):
+        super().__init__(in_features, out_features, bias)
+        self.threshold = threshold
+
+    def ternary_weight(self):
+        w = self.weight
+
+        ternary_w = torch.where(
+            w > self.threshold,
+            torch.ones_like(w),
+            torch.where(
+                w < -self.threshold,
+                -torch.ones_like(w),
+                torch.zeros_like(w)
+            )
+        )
+
+        return ternary_w
+
+    def forward(self, input):
+        ternary_w = self.ternary_weight()
+        return F.linear(input, ternary_w, self.bias)
+
+# ============================================
+# 4) Ternary MNIST Network
+# ============================================
+class TernaryMNIST(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.fc1 = TernaryLinear(784, 256, threshold=0.05)
+        self.fc2 = TernaryLinear(256, 128, threshold=0.05)
+
+        # Keep final layer full precision first
+        self.fc3 = nn.Linear(128, 10)
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+
+        return x
+
+
+
+# ============================================
+# 5) Model, Loss, Optimizer
+# ============================================
+model = TernaryMNIST()
+
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+# ============================================
+# 6) Training
+# ============================================
+
+train_losses = []
+
+for epoch in range(num_epochs):
+    model.train()
+    running_loss = 0
+
+    for images, labels in train_loader:
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+
+        if torch.isnan(outputs).any():
+            print("NaN in outputs")
+            break
+
+        if torch.isnan(loss):
+            print("NaN in loss")
+            break
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+
+    avg_loss = running_loss / len(train_loader)
+    train_losses.append(avg_loss)
+
+    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
+
+
+
+'''
+24 may 2026
+
+Epoch 1/100, Loss: 2.3017
+Epoch 2/100, Loss: 2.3015
+Epoch 3/100, Loss: 2.3015
+Epoch 4/100, Loss: 2.3014
+Epoch 5/100, Loss: 2.3014
+Epoch 6/100, Loss: 2.3014
+Epoch 7/100, Loss: 2.3014
+Epoch 8/100, Loss: 2.3014
+Epoch 9/100, Loss: 2.3014
+Epoch 10/100, Loss: 2.3014
+Epoch 11/100, Loss: 2.3014
+Epoch 12/100, Loss: 2.3014
+Epoch 13/100, Loss: 2.3013
+Epoch 14/100, Loss: 2.3014
+Epoch 15/100, Loss: 2.3013
+Epoch 16/100, Loss: 2.3014
+Epoch 17/100, Loss: 2.3013
+Epoch 18/100, Loss: 2.3013
+Epoch 19/100, Loss: 2.3014
+Epoch 20/100, Loss: 2.3013
+Epoch 21/100, Loss: 2.3013
+Epoch 22/100, Loss: 2.3013
+Epoch 23/100, Loss: 2.3013
+Epoch 24/100, Loss: 2.3013
+Epoch 25/100, Loss: 2.3013
+Epoch 26/100, Loss: 2.3013
+Epoch 27/100, Loss: 2.3013
+Epoch 28/100, Loss: 2.3013
+Epoch 29/100, Loss: 2.3013
+Epoch 30/100, Loss: 2.3013
+Epoch 31/100, Loss: 2.3013
+Epoch 32/100, Loss: 2.3013
+Epoch 33/100, Loss: 2.3013
+Epoch 34/100, Loss: 2.3013
+Epoch 35/100, Loss: 2.3013
+Epoch 36/100, Loss: 2.3013
+Epoch 37/100, Loss: 2.3013
+Epoch 38/100, Loss: 2.3013
+Epoch 39/100, Loss: 2.3013
+Epoch 40/100, Loss: 2.3013
+Epoch 41/100, Loss: 2.3013
+Epoch 42/100, Loss: 2.3013
+Epoch 43/100, Loss: 2.3013
+Epoch 44/100, Loss: 2.3013
+Epoch 45/100, Loss: 2.3013
+Epoch 46/100, Loss: 2.3013
+Epoch 47/100, Loss: 2.3013
+Epoch 48/100, Loss: 2.3013
+Epoch 49/100, Loss: 2.3013
+Epoch 50/100, Loss: 2.3013
+Epoch 51/100, Loss: 2.3013
+Epoch 52/100, Loss: 2.3013
+Epoch 53/100, Loss: 2.3013
+Epoch 54/100, Loss: 2.3013
+Epoch 55/100, Loss: 2.3013
+Epoch 56/100, Loss: 2.3013
+Epoch 57/100, Loss: 2.3013
+Epoch 58/100, Loss: 2.3013
+Epoch 59/100, Loss: 2.3013
+Epoch 60/100, Loss: 2.3013
+Epoch 61/100, Loss: 2.3013
+Epoch 62/100, Loss: 2.3013
+Epoch 63/100, Loss: 2.3013
+Epoch 64/100, Loss: 2.3013
+Epoch 65/100, Loss: 2.3013
+Epoch 66/100, Loss: 2.3013
+Epoch 67/100, Loss: 2.3013
+Epoch 68/100, Loss: 2.3013
+Epoch 69/100, Loss: 2.3013
+Epoch 70/100, Loss: 2.3012
+Epoch 71/100, Loss: 2.3013
+Epoch 72/100, Loss: 2.3013
+Epoch 73/100, Loss: 2.3013
+Epoch 74/100, Loss: 2.3013
+Epoch 75/100, Loss: 2.3012
+Epoch 76/100, Loss: 2.3012
+Epoch 77/100, Loss: 2.3012
+Epoch 78/100, Loss: 2.3013
+Epoch 79/100, Loss: 2.3013
+Epoch 80/100, Loss: 2.3012
+Epoch 81/100, Loss: 2.3012
+Epoch 82/100, Loss: 2.3013
+Epoch 83/100, Loss: 2.3012
+Epoch 84/100, Loss: 2.3012
+Epoch 85/100, Loss: 2.3013
+Epoch 86/100, Loss: 2.3012
+Epoch 87/100, Loss: 2.3012
+Epoch 88/100, Loss: 2.3012
+Epoch 89/100, Loss: 2.3012
+Epoch 90/100, Loss: 2.3013
+Epoch 91/100, Loss: 2.3012
+Epoch 92/100, Loss: 2.3012
+Epoch 93/100, Loss: 2.3012
+Epoch 94/100, Loss: 2.3012
+Epoch 95/100, Loss: 2.3012
+Epoch 96/100, Loss: 2.3013
+Epoch 97/100, Loss: 2.3012
+Epoch 98/100, Loss: 2.3012
+Epoch 99/100, Loss: 2.3012
+Epoch 100/100, Loss: 2.3012
+
+
+'''
+
+
+# ============================================
+# 7) Evaluation
+# ============================================
+model.eval()
+correct = 0
+total = 0
+
+with torch.no_grad():
+    for images, labels in test_loader:
+        outputs = model(images)
+        predicted = outputs.argmax(dim=1)
+
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+accuracy = 100 * correct / total
+print(f"Test Accuracy: {accuracy:.2f}%")
+
+'''
+Test Accuracy: 11.35%
+
+'''
+
+
+
+#------- SAVE --------
+
+checkpoint = {
+    'epoch': num_epochs,
+    'model_state_dict': model.state_dict(),
+    'optimizer_state_dict': optimizer.state_dict(),
+    'loss': avg_loss
+}
+
+torch.save(checkpoint, PTH_DIR / f"{date_name}_may_TNN_without_BP.pth")
+
+
+
+# ============================================
+# 8) Plot training loss (simple)
+# ============================================
+epochs = np.arange(1, num_epochs + 1)
+layer_names = ["fc1", "fc2", "fc3"]
+layers = [model.fc1, model.fc2, model.fc3]
+layer_colors = ["#059669", "#7c3aed", "#dc2626"]
+
+_plot_rc = {
+    "figure.facecolor": "white",
+    "axes.facecolor": "#f8fafc",
+    "axes.edgecolor": "#cbd5e1",
+    "axes.labelcolor": "#334155",
+    "axes.titleweight": "bold",
+    "axes.titlesize": 13,
+    "axes.labelsize": 11,
+    "xtick.color": "#475569",
+    "ytick.color": "#475569",
+    "grid.color": "#e2e8f0",
+    "grid.linestyle": "-",
+    "font.family": "sans-serif",
+}
+plt.rcParams.update(_plot_rc)
+
+
+def _style_axis(ax):
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(True, alpha=0.6)
+
+
+def _layer_param_norm(module):
+    """L2 norm over weight + bias of a layer."""
+    sq = sum(p.detach().pow(2).sum().item() for p in module.parameters())
+    return sq ** 0.5
+
+
+def _layer_grad_norm(module, loss):
+    """L2 norm of gradients (weight + bias); fallback if .grad is None."""
+    grads = []
+    for p in module.parameters():
+        if not p.requires_grad:
+            continue
+        g = p.grad
+        if g is None:
+            g = torch.autograd.grad(loss, p, retain_graph=True, allow_unused=True)[0]
+        if g is not None:
+            grads.append(g.detach())
+    if not grads:
+        return 0.0
+    return (sum(g.pow(2).sum().item() for g in grads)) ** 0.5
+
+
+def _bar_labels(ax, bars, fmt="{:.3f}"):
+    for bar in bars:
+        h = bar.get_height()
+        ax.text(
+            bar.get_x() + bar.get_width() / 2, h,
+            fmt.format(h), ha="center", va="bottom", fontsize=9, color="#334155",
+        )
+
+
+# --- Figure 1: Training loss curve ---
+fig1, ax1 = plt.subplots(figsize=(9, 5.5), dpi=120)
+ax1.plot(
+    epochs, train_losses, color="#2563eb", linewidth=2.5,
+    marker="o", markersize=5, markevery=max(1, num_epochs // 10),
+    markerfacecolor="white", markeredgewidth=1.5, markeredgecolor="#2563eb",
+    label="Train loss", zorder=3,
+)
+ax1.fill_between(epochs, train_losses, min(train_losses), color="#2563eb", alpha=0.08)
+ax1.set_title("Training Loss")
+ax1.set_xlabel("Epoch")
+ax1.set_ylabel("Cross-entropy loss")
+ax1.set_xlim(1, num_epochs)
+_style_axis(ax1)
+ax1.legend(frameon=True, fancybox=True, shadow=False, edgecolor="#e2e8f0")
+fig1.tight_layout()
+plt.show()
+
+# --- Figure 2: Loss change per epoch ---
+loss_change = np.diff(train_losses)
+epoch_change = epochs[1:]
+fig2, ax2 = plt.subplots(figsize=(9, 5.5), dpi=120)
+bar_colors = ["#10b981" if v <= 0 else "#ef4444" for v in loss_change]
+bars2 = ax2.bar(epoch_change, loss_change, color=bar_colors, alpha=0.85, width=0.85, edgecolor="white", linewidth=0.6)
+ax2.axhline(0, color="#64748b", linewidth=1.0)
+ax2.set_title("Loss Change per Epoch")
+ax2.set_xlabel("Epoch")
+ax2.set_ylabel("Delta loss")
+_style_axis(ax2)
+fig2.tight_layout()
+plt.show()
+
+# --- Figure 3: Weight L2 norm per layer ---
+weight_norms = [_layer_param_norm(layer) for layer in layers]
+fig3, ax3 = plt.subplots(figsize=(9, 5.5), dpi=120)
+bars3 = ax3.bar(layer_names, weight_norms, color=layer_colors, alpha=0.9, width=0.55, edgecolor="white", linewidth=0.8)
+ax3.set_title("Full-Precision Weight Norms per Layer")
+ax3.set_ylabel("L2 norm")
+_style_axis(ax3)
+_bar_labels(ax3, bars3, fmt="{:.2f}")
+fig3.tight_layout()
+plt.show()
+
+# --- Figure 4: Gradient L2 norm per layer (one backprop step) ---
+model.train()
+images, labels = next(iter(train_loader))
+optimizer.zero_grad(set_to_none=True)
+loss = criterion(model(images), labels)
+loss.backward()
+grad_norms = [_layer_grad_norm(layer, loss) for layer in layers]
+
+fig4, ax4 = plt.subplots(figsize=(9, 5.5), dpi=120)
+bars4 = ax4.bar(layer_names, grad_norms, color=layer_colors, alpha=0.9, width=0.55, edgecolor="white", linewidth=0.8)
+ax4.set_title("Gradient Norms per Layer (one batch)")
+ax4.set_ylabel("L2 norm of gradients")
+_style_axis(ax4)
+_bar_labels(ax4, bars4, fmt="{:.4f}")
+fig4.tight_layout()
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+######################################################################
+######################################################################
+######################################################################
+######################################################################
+'''                    TNN With different BP                     '''
+######################################################################
+######################################################################
+######################################################################
+######################################################################
+
+
+
+# ============================================
+# 3) Ternary Weight Function with STE
+# ============================================
+
+class TernaryWeightFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, weight, threshold):
+        ctx.save_for_backward(weight)
+        
+        #for option 6
+        #ctx.threshold = threshold
+
+        ternary_w = torch.where(
+            weight > threshold,
+            torch.ones_like(weight),
+            torch.where(
+                weight < -threshold,
+                -torch.ones_like(weight),
+                torch.zeros_like(weight)
+            )
+        )
+
+        return ternary_w
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        weight, = ctx.saved_tensors
+        
+        #--------------------------------------
+        #option1 : Plain STE
+        #grad_weight = grad_output.clone()
+        
+        
+        #--------------------------------------
+        #option2 : Clipped STE 
+        # Straight-Through Estimator surrogate gradient
+        #grad_weight = grad_output.clone()
+        # Optional gradient clipping mask
+        #grad_weight = grad_weight * (weight.abs() <= 1.0).float()
+        
+        
+        #--------------------------------------
+        #option3 : Scaled STE
+        #grad_weight = grad_output.clone() * 0.80
+        
+        
+        
+        
+        
+        #--------------------------------------
+        #option4:Bi-Real style triangular surrogate
+        #grad_surrogate = torch.clamp(2.0 - 2.0 * weight.abs(), min=0.0)
+        #grad_weight = grad_output * grad_surrogate
+        
+        
+        
+        #--------------------------------------
+        #option5: tanh / IR-Net style surrogate
+        beta = 3.0
+        grad_surrogate = beta * (1.0 - torch.tanh(beta * weight) ** 2)
+        grad_weight = grad_output * grad_surrogate
+        
+        
+        
+        
+        #--------------------------------------
+        #option6 : threshold-window surrogate for ternary
+        #uncomment also in forward()
+        
+        
+        #threshold = ctx.threshold
+        #width = 0.7
+        #near_pos_threshold = (weight - threshold).abs() <= width
+        #near_neg_threshold = (weight + threshold).abs() <= width
+        #grad_surrogate = (near_pos_threshold | near_neg_threshold).float()
+        #grad_weight = grad_output * grad_surrogate
+        
+        
+        
+        
+        #option 7 : Even smoother --> smooth threshold-window surrogate for ternary
+        #threshold = ctx.threshold
+        #width = 0.9
+
+        #dist_pos = (weight - threshold).abs()
+        #dist_neg = (weight + threshold).abs()
+
+        #grad_pos = torch.clamp(1.0 - dist_pos / width, min=0.0)
+        #grad_neg = torch.clamp(1.0 - dist_neg / width, min=0.0)
+
+        #grad_surrogate = torch.maximum(grad_pos, grad_neg)
+        #grad_weight = grad_output * grad_surrogate
+        
+
+
+        return grad_weight, None
+    
+    
+   
+
+# ============================================
+# 4) Ternary Linear Layer
+# ============================================
+class TernaryLinear(nn.Linear):
+    def __init__(self, in_features, out_features, bias=True, threshold=0.05):
+        super().__init__(in_features, out_features, bias)
+        self.threshold = threshold
+
+    def ternary_weight(self):
+        return TernaryWeightFunction.apply(self.weight, self.threshold)
+
+    def forward(self, input):
+        ternary_w = self.ternary_weight()
+        return F.linear(input, ternary_w, self.bias)
+
+# ============================================
+# 5) Ternary Neural Network
+# ============================================
+class TernaryMNIST(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.fc1 = TernaryLinear(784, 256, threshold=0.05)
+        self.fc2 = TernaryLinear(256, 128, threshold=0.05)
+
+        # Keep output layer full precision first
+        #self.fc3 = nn.Linear(128, 10)
+        self.fc3 = TernaryLinear(128, 10, threshold=0.05)
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+
+        return x
+
+# ============================================
+# 6) Model, Loss, Optimizer
+# ============================================
+model = TernaryMNIST()
+
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+# ============================================
+# 7) Training Loop
+# ============================================
+num_epochs = 100
+train_losses = []
+
+for epoch in range(num_epochs):
+    model.train()
+    running_loss = 0.0
+
+    for images, labels in train_loader:
+        outputs = model(images)
+
+        if torch.isnan(outputs).any():
+            print("NaN in outputs")
+            break
+
+        loss = criterion(outputs, labels)
+
+        if torch.isnan(loss):
+            print("NaN in loss")
+            break
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+
+    avg_loss = running_loss / len(train_loader)
+    train_losses.append(avg_loss)
+
+    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
+
+# ============================================
+# 8) Evaluation
+# ============================================
+model.eval()
+correct = 0
+total = 0
+
+with torch.no_grad():
+    for images, labels in test_loader:
+        outputs = model(images)
+        predicted = outputs.argmax(dim=1)
+
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+accuracy = 100 * correct / total
+print(f"Test Accuracy: {accuracy:.2f}%")
+
+
+
+# ============================================
+# 9) Plot Training Loss
+# ============================================
+plt.figure(figsize=(7, 4))
+plt.plot(range(1, num_epochs + 1), train_losses, marker="o")
+plt.title("Training Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.grid(True)
+plt.show()
+
+
+'''
+21 may RESULTS in 21_optimiAtion_ternary.docs
+
+'''
+
+
+
+
+#=================================
+#=================================
+#=================================
+'''      Comparison Among all '''
+#=================================
+#=================================
+#=================================
+
+
+'''
+Model	BP	epoch	learning rate	meta data	Test accuracy
+ANN	Normal	100	0.001		97.91%
+ANN	Normal	100	0.0001		98%
+ANN	Normal	199	0.01		68.82%
+TNN	Without	100	1.00E-04	without BP	11.35%
+TNN	STE	100	1.00E-04		93.50%
+TNN	Clipped STE	100	1.00E-04		93.50%
+TNN	Scaled STE	100	1.00E-04	scale=0.5	93.67%
+TNN	Scaled STE	100	1.00E-04	scale=0.3	92.39%
+TNN	Scaled STE	100	1.00E-04	scale=0.7	94.36%
+TNN	Scaled STE	100	1.00E-04	scale=0.9	92.34%
+TNN	Scaled STE	100	1.00E-04	scale=0.6	93.36%
+TNN	Scaled STE	100	1.00E-04	scale=0.65	91.54%
+TNN	Scaled STE	100	1.00E-04	scale=0.75	94.06%
+TNN	Scaled STE	100	1.00E-04	scale=0.8	92.92%
+TNN	Bi-Real style triangular surrogate	100	1.00E-04		93.24%
+TNN	Tanh/IR-Net style surrogate	100	1.00E-04	beta=2	93.04%
+TNN	Tanh/IR-Net style surrogate	100	1.00E-04	beta=1	92.67%
+TNN	Tanh/IR-Net style surrogate	100	1.00E-04	beta=3	92.25%
+TNN	threshold-window surrogate	100	1.00E-04	width=0.3	93.50%
+TNN	threshold-window surrogate	100	1.00E-04	width=0.5	93.50%
+TNN	threshold-window surrogate	100	1.00E-04	width=0.7	93.50%
+TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.5	92.77%
+TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.3	93.24%
+TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.7	93.78%
+TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.6	93.51%
+TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.8	93.22%
+TNN	Smooth threshold-window surrogate	100	1.00E-04	width=0.9	93.02%
+
+'''
+
+# ============================================
+#  TNN comparison plots (final test accuracy)
+# ============================================
+import os
+import random
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+try:
+    _PROJECT_DIR = Path(__file__).resolve().parent
+except NameError:
+    # Jupyter / interactive cells do not define __file__
+    _PROJECT_DIR = Path.cwd()
+
+RESULTS_DIR = _PROJECT_DIR / "figures" / "tnn_comparison"
+
+ANN_BEST = 98.00  # full-precision ANN baseline (lr = 1e-4)
+ACC_YMAX = 100  # cap y-axis at full accuracy (%); minimum auto-scaled from data
+FIG1_YMIN = 80  # figure 1 only — zoom in so bar differences are visible
+
+
+# Parsed from results table above
+TNN_RESULTS = [
+    {"family": "Baseline", "label": "Without BP", "bp": "Without", "meta": "without BP", "acc": 11.35},
+    {"family": "STE", "label": "STE", "bp": "STE", "meta": "", "acc": 93.50},
+    {"family": "STE", "label": "Clipped STE", "bp": "Clipped STE", "meta": "", "acc": 93.50},
+    {"family": "Scaled STE", "label": "scale=0.5", "bp": "Scaled STE", "meta": "scale=0.5", "acc": 93.67},
+    {"family": "Scaled STE", "label": "scale=0.3", "bp": "Scaled STE", "meta": "scale=0.3", "acc": 92.39},
+    {"family": "Scaled STE", "label": "scale=0.7", "bp": "Scaled STE", "meta": "scale=0.7", "acc": 94.36},
+    {"family": "Scaled STE", "label": "scale=0.9", "bp": "Scaled STE", "meta": "scale=0.9", "acc": 92.34},
+    {"family": "Scaled STE", "label": "scale=0.6", "bp": "Scaled STE", "meta": "scale=0.6", "acc": 93.36},
+    {"family": "Scaled STE", "label": "scale=0.65", "bp": "Scaled STE", "meta": "scale=0.65", "acc": 91.54},
+    {"family": "Scaled STE", "label": "scale=0.75", "bp": "Scaled STE", "meta": "scale=0.75", "acc": 94.06},
+    {"family": "Scaled STE", "label": "scale=0.8", "bp": "Scaled STE", "meta": "scale=0.8", "acc": 92.92},
+    {"family": "Bi-Real", "label": "Bi-Real triangular", "bp": "Bi-Real style triangular surrogate", "meta": "", "acc": 93.24},
+    {"family": "Tanh/IR-Net", "label": "beta=2", "bp": "Tanh/IR-Net style surrogate", "meta": "beta=2", "acc": 93.04},
+    {"family": "Tanh/IR-Net", "label": "beta=1", "bp": "Tanh/IR-Net style surrogate", "meta": "beta=1", "acc": 92.67},
+    {"family": "Tanh/IR-Net", "label": "beta=3", "bp": "Tanh/IR-Net style surrogate", "meta": "beta=3", "acc": 92.25},
+    {"family": "Threshold-window", "label": "width=0.3", "bp": "threshold-window surrogate", "meta": "width=0.3", "acc": 93.50},
+    {"family": "Threshold-window", "label": "width=0.5", "bp": "threshold-window surrogate", "meta": "width=0.5", "acc": 93.50},
+    {"family": "Threshold-window", "label": "width=0.7", "bp": "threshold-window surrogate", "meta": "width=0.7", "acc": 93.50},
+    {"family": "Smooth threshold-window", "label": "width=0.5", "bp": "Smooth threshold-window surrogate", "meta": "width=0.5", "acc": 92.77},
+    {"family": "Smooth threshold-window", "label": "width=0.3", "bp": "Smooth threshold-window surrogate", "meta": "width=0.3", "acc": 93.24},
+    {"family": "Smooth threshold-window", "label": "width=0.7", "bp": "Smooth threshold-window surrogate", "meta": "width=0.7", "acc": 93.78},
+    {"family": "Smooth threshold-window", "label": "width=0.6", "bp": "Smooth threshold-window surrogate", "meta": "width=0.6", "acc": 93.51},
+    {"family": "Smooth threshold-window", "label": "width=0.8", "bp": "Smooth threshold-window surrogate", "meta": "width=0.8", "acc": 93.22},
+    {"family": "Smooth threshold-window", "label": "width=0.9", "bp": "Smooth threshold-window surrogate", "meta": "width=0.9", "acc": 93.02},
+]
+
+# ColorBrewer / Okabe–Ito inspired — colorblind-friendly, print-safe
+FAMILY_COLORS = {
+    "Baseline": "#6E6E6E",
+    "STE": "#0C5DA5",
+    "Scaled STE": "#944C00",
+    "Bi-Real": "#1B7F3B",
+    "Tanh/IR-Net": "#6B4C9A",
+    "Threshold-window": "#3A6EA8",
+    "Smooth threshold-window": "#A63D40",
+}
+
+ANN_LINE_COLOR = "#404040"
+FIGURE_DPI = 200          # on-screen / notebook preview
+SAVEFIG_DPI = 600         # publication-quality export
+BAR_EDGE = "#2D2D2D"
+BAR_ALPHA = 0.92
+
+
+def _setup_academic_style():
+    """Matplotlib rcParams for thesis / journal figures."""
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+        "mathtext.fontset": "dejavuserif",
+        "font.size": 11,
+        "axes.titlesize": 12,
+        "axes.labelsize": 11,
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 9,
+        "legend.fontsize": 9,
+        "axes.titleweight": "normal",
+        "axes.labelweight": "normal",
+        "axes.linewidth": 0.9,
+        "axes.edgecolor": "#2D2D2D",
+        "axes.facecolor": "white",
+        "figure.facecolor": "white",
+        "figure.dpi": FIGURE_DPI,
+        "savefig.dpi": SAVEFIG_DPI,
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.05,
+        "savefig.facecolor": "white",
+        "savefig.edgecolor": "none",
+        "grid.color": "#C8C8C8",
+        "grid.linestyle": "-",
+        "grid.linewidth": 0.5,
+        "grid.alpha": 0.55,
+        "lines.linewidth": 1.8,
+        "lines.markersize": 7,
+        "xtick.direction": "out",
+        "ytick.direction": "out",
+        "xtick.major.size": 4,
+        "ytick.major.size": 4,
+        "legend.frameon": True,
+        "legend.framealpha": 1.0,
+        "legend.edgecolor": "#B0B0B0",
+        "legend.fancybox": False,
+    })
+
+
+def _style_axes(ax, title, ylabel="Test accuracy (%)"):
+    ax.set_title(title, pad=12)
+    ax.set_ylabel(ylabel)
+    ax.grid(True, axis="y", zorder=0)
+    ax.set_axisbelow(True)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#2D2D2D")
+    ax.spines["bottom"].set_color("#2D2D2D")
+
+
+def _style_legend(ax, loc="best"):
+    leg = ax.legend(loc=loc, borderpad=0.6, handlelength=2.2)
+    if leg:
+        leg.get_frame().set_linewidth(0.6)
+    return leg
+
+
+def _set_accuracy_ylim(ax, ymax=ACC_YMAX):
+    ax.set_ylim(top=ymax)
+
+
+def _add_ann_reference(ax):
+    ax.axhline(
+        ANN_BEST,
+        color=ANN_LINE_COLOR,
+        linestyle=(0, (6, 4)),
+        linewidth=1.1,
+        label="ANN best (98.0%)",
+        zorder=4,
+    )
+    _set_accuracy_ylim(ax)
+
+
+def _parse_param(meta, key):
+    if not meta or f"{key}=" not in meta:
+        return None
+    return float(meta.split(f"{key}=")[1])
+
+
+def _save_figure(fig, save_dir, stem):
+    save_dir = Path(save_dir)
+    if SAVE_FIGS:
+        fig.savefig(save_dir / f"{stem}.png", dpi=SAVEFIG_DPI)
+        fig.savefig(save_dir / f"{stem}.pdf")
+
+
+def _bar_kwargs():
+    return dict(edgecolor=BAR_EDGE, linewidth=0.55, alpha=BAR_ALPHA, zorder=3)
+
+
+def _line_kwargs(color, marker):
+    return dict(
+        color=color,
+        marker=marker,
+        linestyle="-",
+        linewidth=1.9,
+        markersize=7.5,
+        markerfacecolor="white",
+        markeredgewidth=1.2,
+        markeredgecolor=color,
+        zorder=4,
+    )
+
+
+def plot_tnn_comparisons(save_dir=RESULTS_DIR, show=True):
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    _setup_academic_style()
+
+    trained = [r for r in TNN_RESULTS if r["family"] != "Baseline"]
+    trained_sorted = sorted(trained, key=lambda r: r["acc"], reverse=True)
+
+    # Figure 1: overview (all trained TNN variants)
+    fig1, ax1 = plt.subplots(figsize=(12, 5.5), dpi=FIGURE_DPI)
+    labels = [f"{r['family']}\n{r['label']}" if r["label"] != r["family"] else r["family"] for r in trained_sorted]
+    colors = [FAMILY_COLORS[r["family"]] for r in trained_sorted]
+    y = [r["acc"] for r in trained_sorted]
+    xpos = np.arange(len(y))
+    bars = ax1.bar(xpos, y, color=colors, width=0.72, **_bar_kwargs())
+    ax1.set_xticks(xpos)
+    ax1.set_xticklabels(labels, rotation=55, ha="right", fontsize=8)
+    _add_ann_reference(ax1)
+    ax1.set_ylim(bottom=FIG1_YMIN, top=ACC_YMAX)
+    best_idx = y.index(max(y))
+    bars[best_idx].set_edgecolor("#000000")
+    bars[best_idx].set_linewidth(1.15)
+    bars[best_idx].set_alpha(1.0)
+    ax1.text(
+        best_idx, y[best_idx] + 0.12, f"{y[best_idx]:.2f}%",
+        ha="center", fontsize=8, fontweight="semibold", color="#1A1A1A",
+    )
+    _style_axes(ax1, "TNN surrogate comparison: test accuracy (100 epochs, lr = $10^{-4}$)")
+    _style_legend(ax1, loc="upper left")
+    fig1.tight_layout()
+    _save_figure(fig1, save_dir, "01_tnn_overview_all_variants")
+
+    # Figure 2: best per surrogate family
+    families = []
+    bests = []
+    for fam in ["Baseline", "STE", "Scaled STE", "Bi-Real", "Tanh/IR-Net", "Threshold-window", "Smooth threshold-window"]:
+        subset = [r for r in TNN_RESULTS if r["family"] == fam]
+        if subset:
+            families.append(fam)
+            bests.append(max(r["acc"] for r in subset))
+    fig2, ax2 = plt.subplots(figsize=(9, 5), dpi=FIGURE_DPI)
+    x = np.arange(len(families))
+    ax2.bar(x, bests, color=[FAMILY_COLORS[f] for f in families], width=0.68, **_bar_kwargs())
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(families, rotation=28, ha="right", fontsize=9)
+    for i, v in enumerate(bests):
+        ax2.text(i, v + 0.35, f"{v:.2f}%", ha="center", fontsize=9, color="#1A1A1A")
+    _add_ann_reference(ax2)
+    _style_axes(ax2, "Best test accuracy per surrogate family")
+    _style_legend(ax2, loc="upper left")
+    fig2.tight_layout()
+    _save_figure(fig2, save_dir, "02_tnn_best_per_family")
+
+    def _param_curve(family, param_key, title, stem, legend_loc="lower center"):
+        rows = [r for r in TNN_RESULTS if r["family"] == family]
+        pts = []
+        for r in rows:
+            val = _parse_param(r["meta"], param_key)
+            if val is not None:
+                pts.append((val, r["acc"]))
+        if not pts:
+            return
+        pts.sort(key=lambda t: t[0])
+        xs, ys = zip(*pts)
+        color = FAMILY_COLORS[family]
+        fig, ax = plt.subplots(figsize=(7, 4.5), dpi=FIGURE_DPI)
+        ax.plot(xs, ys, label=family, **_line_kwargs(color, "o"))
+        for xv, yv in zip(xs, ys):
+            ax.annotate(
+                f"{yv:.2f}%", (xv, yv),
+                textcoords="offset points", xytext=(0, 7),
+                ha="center", fontsize=8, color="#1A1A1A",
+            )
+        _add_ann_reference(ax)
+        ax.set_xlabel(param_key)
+        _style_axes(ax, title)
+        _style_legend(ax, loc=legend_loc)
+        fig.tight_layout()
+        _save_figure(fig, save_dir, stem)
+
+    # Figures 3–6: hyperparameter sweep curves
+    _param_curve("Scaled STE", "scale", "Scaled STE: accuracy vs scale factor", "03_scaled_ste_vs_scale", legend_loc="upper right")
+    _param_curve("Tanh/IR-Net", "beta", "Tanh/IR-Net surrogate: accuracy vs $\\beta$", "04_tanh_beta_vs_accuracy", legend_loc="upper right")
+    _param_curve("Threshold-window", "width", "Threshold-window surrogate: accuracy vs width", "05_threshold_window_vs_width")
+    _param_curve(
+        "Smooth threshold-window", "width",
+        "Smooth threshold-window surrogate: accuracy vs width",
+        "06_smooth_threshold_window_vs_width",
+        legend_loc="upper right",
+    )
+
+    # Figure 7: STE variants
+    ste_rows = [r for r in TNN_RESULTS if r["family"] == "STE"]
+    fig7, ax7 = plt.subplots(figsize=(6, 4.5), dpi=FIGURE_DPI)
+    x7 = np.arange(len(ste_rows))
+    ax7.bar(
+        x7, [r["acc"] for r in ste_rows],
+        color=FAMILY_COLORS["STE"], width=0.55, **_bar_kwargs(),
+    )
+    ax7.set_xticks(x7)
+    ax7.set_xticklabels([r["label"] for r in ste_rows], fontsize=10)
+    _add_ann_reference(ax7)
+    _style_axes(ax7, "Plain vs clipped STE")
+    _style_legend(ax7, loc="lower right")
+    fig7.tight_layout()
+    _save_figure(fig7, save_dir, "07_ste_variants")
+
+    # Figure 8: hard vs smooth threshold-window
+    hard = {_parse_param(r["meta"], "width"): r["acc"] for r in TNN_RESULTS if r["family"] == "Threshold-window"}
+    smooth = {_parse_param(r["meta"], "width"): r["acc"] for r in TNN_RESULTS if r["family"] == "Smooth threshold-window"}
+    fig8, ax8 = plt.subplots(figsize=(7.5, 4.5), dpi=FIGURE_DPI)
+    hard_w = sorted(hard)
+    smooth_w = sorted(smooth)
+    ax8.plot(
+        hard_w, [hard[w] for w in hard_w],
+        label="Hard threshold-window",
+        **_line_kwargs(FAMILY_COLORS["Threshold-window"], "s"),
+    )
+    ax8.plot(
+        smooth_w, [smooth[w] for w in smooth_w],
+        label="Smooth threshold-window",
+        **_line_kwargs(FAMILY_COLORS["Smooth threshold-window"], "o"),
+    )
+    _add_ann_reference(ax8)
+    ax8.set_xlabel("width")
+    _style_axes(ax8, "Hard vs smooth threshold-window surrogates")
+    _style_legend(ax8, loc="upper right")
+    fig8.tight_layout()
+    _save_figure(fig8, save_dir, "08_hard_vs_smooth_threshold_window")
+
+    # Figure 9: gap to ANN best
+    fig9, ax9 = plt.subplots(figsize=(12, 4.5), dpi=FIGURE_DPI)
+    gap = [ANN_BEST - r["acc"] for r in trained_sorted]
+    x9 = np.arange(len(gap))
+    ax9.bar(
+        x9, gap,
+        color=[FAMILY_COLORS[r["family"]] for r in trained_sorted],
+        width=0.72, **_bar_kwargs(),
+    )
+    ax9.set_xticks(x9)
+    ax9.set_xticklabels([r["label"] for r in trained_sorted], rotation=55, ha="right", fontsize=8)
+    ax9.axhline(0, color="#2D2D2D", linewidth=0.9, zorder=4)
+    _style_axes(ax9, "Accuracy gap vs full-precision ANN (98.0%)", ylabel="Gap to ANN best (percentage points)")
+    fig9.tight_layout()
+    _save_figure(fig9, save_dir, "09_gap_to_ann_best")
+
+    if show:
+        plt.show()
+    else:
+        plt.close("all")
+
+    print(f"TNN comparison figures saved ({SAVEFIG_DPI} dpi PNG + vector PDF):\n  {save_dir}")
+    return save_dir
+
+
+# Set True to generate comparison figures (no extra files needed)
+RUN_COMPARISON_PLOTS = True
+
+if RUN_COMPARISON_PLOTS:
+    plot_tnn_comparisons(show=True)
+
+
+
+
+
+
+
+
+
+
+
+#====================================================
+#====================================================
+#====================================================
+'''     Comparison top 3 candidates  '''
+#====================================================
+#====================================================
+#====================================================
+'''
+Top-3 TNN candidates â€” joint training and in-depth comparison.
+
+Candidates (from surrogate sweep):
+  - Scaled STE, scale = 0.7
+  - Scaled STE, scale = 0.75
+  - Smooth threshold-window, width = 0.7
+
+Training: 100 epochs, Adam lr = 1e-4, MNIST, seed = 42.
+
+'''
+
+
+BATCH_SIZE = batch_size
+THRESHOLD = 0.05
+LEARNING_RATE = learning_rate
+NUM_EPOCHS = num_epochs
+
+
+FIGURES_DIR = PROJECT_DIR / "figures" / "tnn_top3_candidates"
+CHECKPOINT_DIR = PTH_DIR / "tnn_top3_candidates"
+
+
+# ============================================
+# Top-3 candidates
+# ============================================
+TOP_CANDIDATES = [
+    {
+        "id": "scaled_ste_0.7",
+        "label": "Scaled STE ($s=0.7$)",
+        "short": "Scaled STE 0.7",
+        "surrogate": "scaled_ste",
+        "scale": 0.7,
+        "width": None,
+        "ref_acc": 94.36,
+    },
+    {
+        "id": "scaled_ste_0.75",
+        "label": "Scaled STE ($s=0.75$)",
+        "short": "Scaled STE 0.75",
+        "surrogate": "scaled_ste",
+        "scale": 0.75,
+        "width": None,
+        "ref_acc": 94.06,
+    },
+    {
+        "id": "smooth_tw_0.7",
+        "label": "Smooth threshold-window ($w=0.7$)",
+        "short": "Smooth TW 0.7",
+        "surrogate": "smooth_threshold_window",
+        "scale": None,
+        "width": 0.7,
+        "ref_acc": 93.78,
+    },
+]
+
+CANDIDATE_COLORS = {
+    "scaled_ste_0.7": "#0C5DA5",
+    "scaled_ste_0.75": "#944C00",
+    "smooth_tw_0.7": "#1B7F3B",
+}
+
+ANN_BEST = 98.0
+ACC_YMAX = 100
+FIGURE_DPI = 200
+SAVEFIG_DPI = 600
+
+
+def set_seed(seed=SEED):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    torch.use_deterministic_algorithms(True, warn_only=True)
+
+
+# ============================================
+# 1) Data
+# ============================================
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.1307,), (0.3081,)),
+    transforms.Lambda(lambda x: x.view(-1)),
+])
+
+train_dataset = datasets.MNIST(root=str(DATA_DIR), train=True, transform=transform, download=True)
+test_dataset = datasets.MNIST(root=str(DATA_DIR), train=False, transform=transform, download=True)
+
+train_generator = torch.Generator().manual_seed(SEED)
+train_loader = DataLoader(
+    train_dataset, batch_size=BATCH_SIZE, shuffle=True, generator=train_generator,
+)
+test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+
+# ============================================
+# 2) Ternary layers with selectable surrogate
+# ============================================
+class TernaryWeightFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, weight, threshold, surrogate, scale, width):
+        ctx.save_for_backward(weight)
+        ctx.threshold = threshold
+        ctx.surrogate = surrogate
+        ctx.scale = scale
+        ctx.width = width
+
+        return torch.where(
+            weight > threshold,
+            torch.ones_like(weight),
+            torch.where(weight < -threshold, -torch.ones_like(weight), torch.zeros_like(weight)),
+        )
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        weight, = ctx.saved_tensors
+        surrogate = ctx.surrogate
+        scale = ctx.scale
+        width = ctx.width
+        threshold = ctx.threshold
+
+        if surrogate == "scaled_ste":
+            grad_weight = grad_output.clone() * scale
+        elif surrogate == "smooth_threshold_window":
+            dist_pos = (weight - threshold).abs()
+            dist_neg = (weight + threshold).abs()
+            grad_pos = torch.clamp(1.0 - dist_pos / width, min=0.0)
+            grad_neg = torch.clamp(1.0 - dist_neg / width, min=0.0)
+            grad_surrogate = torch.maximum(grad_pos, grad_neg)
+            grad_weight = grad_output * grad_surrogate
+        else:
+            raise ValueError(f"Unknown surrogate: {surrogate}")
+
+        return grad_weight, None, None, None, None
+
+
+class TernaryLinear(nn.Linear):
+    def __init__(self, in_features, out_features, bias=True, threshold=THRESHOLD, surrogate_cfg=None):
+        super().__init__(in_features, out_features, bias)
+        self.threshold = threshold
+        self.surrogate_cfg = surrogate_cfg or {}
+
+    def ternary_weight(self):
+        cfg = self.surrogate_cfg
+        return TernaryWeightFunction.apply(
+            self.weight,
+            self.threshold,
+            cfg["surrogate"],
+            cfg.get("scale", 1.0),
+            cfg.get("width", 0.7),
+        )
+
+    def forward(self, input):
+        return F.linear(input, self.ternary_weight(), self.bias)
+
+
+class TernaryMNIST(nn.Module):
+    def __init__(self, surrogate_cfg):
+        super().__init__()
+        self.surrogate_cfg = surrogate_cfg
+        self.fc1 = TernaryLinear(784, 256, threshold=THRESHOLD, surrogate_cfg=surrogate_cfg)
+        self.fc2 = TernaryLinear(256, 128, threshold=THRESHOLD, surrogate_cfg=surrogate_cfg)
+        self.fc3 = TernaryLinear(128, 10, threshold=THRESHOLD, surrogate_cfg=surrogate_cfg)
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
+
+    def layer_modules(self):
+        return {"fc1": self.fc1, "fc2": self.fc2, "fc3": self.fc3}
+
+
+def _surrogate_cfg_from_candidate(candidate):
+    cfg = {"surrogate": candidate["surrogate"]}
+    if candidate["surrogate"] == "scaled_ste":
+        cfg["scale"] = candidate["scale"]
+        cfg["width"] = 0.7
+    else:
+        cfg["scale"] = 1.0
+        cfg["width"] = candidate["width"]
+    return cfg
+
+
+# ============================================
+# 3) Train / evaluate
+# ============================================
+def _accuracy(model, loader, device):
+    model.eval()
+    correct = total = 0
+    with torch.no_grad():
+        for images, labels in loader:
+            images, labels = images.to(device), labels.to(device)
+            preds = model(images).argmax(dim=1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+    return 100.0 * correct / total
+
+
+def train_candidate(candidate, device=None, verbose=True):
+    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    set_seed(SEED)
+
+    surrogate_cfg = _surrogate_cfg_from_candidate(candidate)
+    model = TernaryMNIST(surrogate_cfg).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    history = {
+        "candidate": candidate,
+        "train_loss": [],
+        "train_acc": [],
+        "test_acc": [],
+    }
+
+    for epoch in range(NUM_EPOCHS):
+        model.train()
+        running_loss = 0.0
+        correct = total = 0
+
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+            preds = outputs.argmax(dim=1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+
+        avg_loss = running_loss / len(train_loader)
+        train_acc = 100.0 * correct / total
+        test_acc = _accuracy(model, test_loader, device)
+
+        history["train_loss"].append(avg_loss)
+        history["train_acc"].append(train_acc)
+        history["test_acc"].append(test_acc)
+
+        if verbose:
+            print(
+                f"[{candidate['short']}] Epoch {epoch + 1}/{NUM_EPOCHS} | "
+                f"loss={avg_loss:.4f} | train_acc={train_acc:.2f}% | test_acc={test_acc:.2f}%"
+            )
+
+    history["final_test_acc"] = history["test_acc"][-1]
+    history["model"] = model
+    history["state_dict"] = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+    return history
+
+
+def collect_weight_stats(model):
+    """Per-layer latent weights and ternary {-1,0,+1} composition."""
+    stats = {}
+    for name, layer in model.layer_modules().items():
+        w = layer.weight.detach().cpu().numpy().ravel()
+        t = layer.ternary_weight().detach().cpu().numpy().ravel()
+        stats[name] = {
+            "latent": w,
+            "ternary": t,
+            "counts": {
+                -1: int((t == -1).sum()),
+                0: int((t == 0).sum()),
+                1: int((t == 1).sum()),
+            },
+            "shape": tuple(layer.weight.shape),
+        }
+    return stats
+
+
+# ============================================
+# 4) Academic plotting
+# ============================================
+def _setup_academic_style():
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+        "mathtext.fontset": "dejavuserif",
+        "font.size": 11,
+        "axes.titlesize": 12,
+        "axes.labelsize": 11,
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 9,
+        "legend.fontsize": 9,
+        "axes.linewidth": 0.9,
+        "axes.edgecolor": "#2D2D2D",
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "figure.dpi": FIGURE_DPI,
+        "savefig.dpi": SAVEFIG_DPI,
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.05,
+        "grid.color": "#C8C8C8",
+        "grid.linewidth": 0.5,
+        "grid.alpha": 0.55,
+        "legend.frameon": True,
+        "legend.fancybox": False,
+        "legend.edgecolor": "#B0B0B0",
+    })
+
+
+def _style_axes(ax, title, ylabel=None, xlabel=None):
+    ax.set_title(title, pad=12)
+    if ylabel:
+        ax.set_ylabel(ylabel)
+    if xlabel:
+        ax.set_xlabel(xlabel)
+    ax.grid(True, axis="y", zorder=0)
+    ax.set_axisbelow(True)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
+def _legend(ax, loc="upper left"):
+    leg = ax.legend(loc=loc, borderpad=0.6, handlelength=2.4)
+    if leg:
+        leg.get_frame().set_linewidth(0.6)
+    return leg
+
+
+def _save_fig(fig, stem):
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    if SAVE_FIGS:
+        fig.savefig(FIGURES_DIR / f"{stem}.png", dpi=SAVEFIG_DPI)
+        fig.savefig(FIGURES_DIR / f"{stem}.pdf")
+
+
+def _line_style(cid):
+    return dict(
+        color=CANDIDATE_COLORS[cid],
+        linewidth=1.9,
+        marker="o",
+        markersize=4.5,
+        markevery=5,
+        markerfacecolor="white",
+        markeredgewidth=1.0,
+        markeredgecolor=CANDIDATE_COLORS[cid],
+    )
+
+
+def plot_all_comparisons(results):
+    _setup_academic_style()
+    epochs = np.arange(1, NUM_EPOCHS + 1)
+
+    # --- 1) Training loss ---
+    fig, ax = plt.subplots(figsize=(8, 4.8), dpi=FIGURE_DPI)
+    for res in results:
+        cid = res["candidate"]["id"]
+        ax.plot(epochs, res["train_loss"], label=res["candidate"]["label"], **_line_style(cid))
+    _style_axes(ax, "Training loss (top-3 TNN surrogates)", ylabel="Cross-entropy loss", xlabel="Epoch")
+    _legend(ax, "upper right")
+    fig.tight_layout()
+    _save_fig(fig, "01_train_loss_curves")
+    plt.close(fig)
+
+    # --- 2) Test accuracy ---
+    fig, ax = plt.subplots(figsize=(8, 4.8), dpi=FIGURE_DPI)
+    for res in results:
+        cid = res["candidate"]["id"]
+        ax.plot(epochs, res["test_acc"], label=res["candidate"]["label"], **_line_style(cid))
+    ax.axhline(ANN_BEST, color="#404040", linestyle=(0, (6, 4)), linewidth=1.1, label="ANN best (98.0%)", zorder=5)
+    ax.set_ylim(top=ACC_YMAX)
+    _style_axes(ax, "Test accuracy during training", ylabel="Test accuracy (%)", xlabel="Epoch")
+    _legend(ax, "lower right")
+    fig.tight_layout()
+    _save_fig(fig, "02_test_accuracy_curves")
+    plt.close(fig)
+
+    # --- 3) Train accuracy ---
+    fig, ax = plt.subplots(figsize=(8, 4.8), dpi=FIGURE_DPI)
+    for res in results:
+        cid = res["candidate"]["id"]
+        ax.plot(epochs, res["train_acc"], label=res["candidate"]["label"], **_line_style(cid))
+    ax.set_ylim(top=ACC_YMAX)
+    _style_axes(ax, "Training accuracy during training", ylabel="Train accuracy (%)", xlabel="Epoch")
+    _legend(ax, "lower right")
+    fig.tight_layout()
+    _save_fig(fig, "03_train_accuracy_curves")
+    plt.close(fig)
+
+    # --- 4) Loss + test accuracy (dual axis style: two panels) ---
+    fig, (ax_l, ax_a) = plt.subplots(2, 1, figsize=(8, 7.2), dpi=FIGURE_DPI, sharex=True)
+    for res in results:
+        cid = res["candidate"]["id"]
+        ax_l.plot(epochs, res["train_loss"], label=res["candidate"]["short"], **_line_style(cid))
+        ax_a.plot(epochs, res["test_acc"], label=res["candidate"]["short"], **_line_style(cid))
+    ax_a.axhline(ANN_BEST, color="#404040", linestyle=(0, (6, 4)), linewidth=1.1, zorder=5)
+    ax_a.set_ylim(top=ACC_YMAX)
+    _style_axes(ax_l, "Top-3 TNN candidates: loss and test accuracy", ylabel="Train loss")
+    _style_axes(ax_a, None, ylabel="Test accuracy (%)", xlabel="Epoch")
+    ax_l.legend(loc="upper right", frameon=True, fontsize=9)
+    fig.tight_layout()
+    _save_fig(fig, "04_loss_and_test_accuracy_panels")
+    plt.close(fig)
+
+    # --- 5) Final test accuracy bar chart ---
+    fig, ax = plt.subplots(figsize=(7, 4.5), dpi=FIGURE_DPI)
+    labels = [r["candidate"]["short"] for r in results]
+    accs = [r["final_test_acc"] for r in results]
+    colors = [CANDIDATE_COLORS[r["candidate"]["id"]] for r in results]
+    x = np.arange(len(labels))
+    bars = ax.bar(x, accs, color=colors, width=0.6, edgecolor="#2D2D2D", linewidth=0.55, alpha=0.92)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=10)
+    for i, v in enumerate(accs):
+        ax.text(i, v + 0.35, f"{v:.2f}%", ha="center", fontsize=9)
+    ax.axhline(ANN_BEST, color="#404040", linestyle=(0, (6, 4)), linewidth=1.1, label="ANN best (98.0%)")
+    ax.set_ylim(top=ACC_YMAX)
+    _style_axes(ax, f"Final test accuracy after {NUM_EPOCHS} epochs", ylabel="Test accuracy (%)")
+    _legend(ax, "upper left")
+    best_i = int(np.argmax(accs))
+    bars[best_i].set_edgecolor("#000000")
+    bars[best_i].set_linewidth(1.1)
+    fig.tight_layout()
+    _save_fig(fig, "05_final_test_accuracy")
+    plt.close(fig)
+
+    # --- 6â€“8) Per-layer latent weight histograms (one figure per layer) ---
+    layer_names = ["fc1", "fc2", "fc3"]
+    layer_titles = ["FC1 (784$\\rightarrow$256)", "FC2 (256$\\rightarrow$128)", "FC3 (128$\\rightarrow$10)"]
+    bins = np.linspace(-1.5, 1.5, 60)
+
+    for layer, title in zip(layer_names, layer_titles):
+        fig, ax = plt.subplots(figsize=(8, 4.5), dpi=FIGURE_DPI)
+        for res in results:
+            cid = res["candidate"]["id"]
+            w = res["weight_stats"][layer]["latent"]
+            ax.hist(
+                w, bins=bins, density=True, histtype="step", linewidth=1.6,
+                label=res["candidate"]["short"], color=CANDIDATE_COLORS[cid],
+            )
+        _style_axes(ax, f"Latent weight distribution â€” {title}", ylabel="Density", xlabel="Latent weight value")
+        _legend(ax, "upper right")
+        fig.tight_layout()
+        _save_fig(fig, f"06_latent_weights_{layer}")
+        plt.close(fig)
+
+    # --- 9â€“11) Per-layer ternary weight histograms ---
+    ternary_bins = [-1.5, -0.5, 0.5, 1.5]
+
+    for layer, title in zip(layer_names, layer_titles):
+        fig, ax = plt.subplots(figsize=(8, 4.5), dpi=FIGURE_DPI)
+        for res in results:
+            cid = res["candidate"]["id"]
+            t = res["weight_stats"][layer]["ternary"]
+            ax.hist(
+                t, bins=ternary_bins, density=True, histtype="step", linewidth=1.8,
+                label=res["candidate"]["short"], color=CANDIDATE_COLORS[cid],
+            )
+        _style_axes(ax, f"Ternary weight distribution ($\\{{-1,0,+1\\}}$) â€” {title}", ylabel="Density", xlabel="Ternary weight")
+        _legend(ax, "upper right")
+        fig.tight_layout()
+        _save_fig(fig, f"07_ternary_weights_{layer}")
+        plt.close(fig)
+
+    # --- 12) Ternary composition stacked bars per layer ---
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4.2), dpi=FIGURE_DPI, sharey=True)
+    x_labels = [r["candidate"]["short"] for r in results]
+    x = np.arange(len(x_labels))
+    width = 0.72
+    ternary_labels = ["$-1$", "$0$", "$+1$"]
+    stack_colors = ["#4A6FA5", "#B0B0B0", "#A63D40"]
+
+    for ax, layer, title in zip(axes, layer_names, ["FC1", "FC2", "FC3"]):
+        bottom = np.zeros(len(results))
+        for tval, tcolor, tlab in zip([-1, 0, 1], stack_colors, ternary_labels):
+            vals = []
+            for res in results:
+                c = res["weight_stats"][layer]["counts"]
+                total = sum(c.values())
+                vals.append(100.0 * c[tval] / total)
+            vals = np.array(vals)
+            ax.bar(x, vals, width, bottom=bottom, label=tlab, color=tcolor, edgecolor="#2D2D2D", linewidth=0.35)
+            bottom += vals
+        ax.set_xticks(x)
+        ax.set_xticklabels(x_labels, rotation=15, ha="right", fontsize=8)
+        ax.set_title(title, fontsize=11)
+        ax.set_ylim(0, 100)
+        ax.grid(True, axis="y", alpha=0.4)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    axes[0].set_ylabel("Share of weights (%)")
+    fig.suptitle("Ternary weight composition per layer (top-3 candidates)", fontsize=12, y=1.02)
+    handles, labels_leg = axes[2].get_legend_handles_labels()
+    fig.legend(handles, labels_leg, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.08), frameon=True)
+    fig.tight_layout()
+    _save_fig(fig, "08_ternary_composition_per_layer")
+    plt.close(fig)
+
+    # --- 13) All layers latent weights â€” small multiples per candidate ---
+    fig, axes = plt.subplots(len(results), 3, figsize=(12, 3.2 * len(results)), dpi=FIGURE_DPI)
+    if len(results) == 1:
+        axes = np.array([axes])
+    for row, res in enumerate(results):
+        cid = res["candidate"]["id"]
+        for col, layer in enumerate(layer_names):
+            ax = axes[row, col]
+            w = res["weight_stats"][layer]["latent"]
+            ax.hist(w, bins=bins, color=CANDIDATE_COLORS[cid], alpha=0.75, edgecolor="#2D2D2D", linewidth=0.3)
+            ax.set_title(f"{res['candidate']['short']} â€” {layer}", fontsize=9)
+            ax.grid(True, axis="y", alpha=0.35)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            if col == 0:
+                ax.set_ylabel("Count")
+            if row == len(results) - 1:
+                ax.set_xlabel("Latent weight")
+    fig.suptitle("Latent weight distributions (all layers)", fontsize=12, y=1.01)
+    fig.tight_layout()
+    _save_fig(fig, "09_latent_weights_grid")
+    plt.close(fig)
+
+    print(f"\nAll comparison figures saved to:\n  {FIGURES_DIR}")
+
+
+# ============================================
+# 5) Main
+# ============================================
+def run_top3_comparison(show_plots=True, save_checkpoints=True):
+    set_seed(SEED)
+    print(f"Random seed: {SEED}")
+    print(f"Training {len(TOP_CANDIDATES)} candidates | {NUM_EPOCHS} epochs | lr={LEARNING_RATE}\n")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}\n")
+
+    results = []
+    for candidate in TOP_CANDIDATES:
+        print("=" * 60)
+        history = train_candidate(candidate, device=device)
+        history["weight_stats"] = collect_weight_stats(history["model"])
+        results.append(history)
+
+        if save_checkpoints:
+            CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+            path = CHECKPOINT_DIR / f"{candidate['id']}.pt"
+            torch.save(
+                {
+                    "candidate": candidate,
+                    "state_dict": history["state_dict"],
+                    "train_loss": history["train_loss"],
+                    "train_acc": history["train_acc"],
+                    "test_acc": history["test_acc"],
+                    "final_test_acc": history["final_test_acc"],
+                },
+                path,
+            )
+            print(f"Checkpoint saved: {path}\n")
+
+    print("=" * 60)
+    print("Final test accuracy summary:")
+    for res in results:
+        c = res["candidate"]
+        print(f"  {c['short']:20s}  {res['final_test_acc']:.2f}%  (reference sweep: {c['ref_acc']:.2f}%)")
+
+    plot_all_comparisons(results)
+
+    if show_plots:
+        plt.show()
+    else:
+        plt.close("all")
+
+    return results
+
+
+RUN_TOP3_COMPARISON = True
+
+if RUN_TOP3_COMPARISON:
+    all_results = run_top3_comparison(show_plots=True, save_checkpoints=True)
+    
+    
+    
+    
+'''
+The comparative evaluation of the three ternary surrogate gradient approaches 
+demonstrates that all candidates were capable of successfully training the TNN
+ architecture, achieving final test accuracies above 91%. However, clear 
+ differences emerged in convergence stability, optimization behavior, and 
+ latent weight organization. Among the evaluated methods, the smooth 
+ threshold-window surrogate with w=0.7 consistently exhibited the most
+ balanced overall performance. Although the scaled STE with s=0.7 occasionally 
+ achieved slightly higher instantaneous test accuracy peaks, the smooth 
+ threshold-window approach provided more stable learning dynamics throughout
+ training, with reduced oscillations in both the loss and accuracy curves. 
+ In contrast, the scaled STE with s=0.75 showed noticeably less stable
+ optimization behavior, including larger fluctuations and intermittent 
+ drops in test accuracy during later training epochs.
+
+
+The training loss analysis further supports the superiority of the smooth 
+threshold-window surrogate. All three methods demonstrated rapid early 
+convergence during the first several epochs, followed by gradual refinement 
+toward lower cross-entropy loss values. Nevertheless, the smooth threshold-window 
+approach maintained the smoothest and most monotonic loss decay across the full
+ training duration. The scaled STE s=0.7 achieved comparable final loss values
+ but exhibited slightly noisier optimization trajectories, suggesting less 
+ controlled gradient propagation. The scaled STE s=0.75, on the other hand,
+ produced the highest level of variance during training, indicating that the
+ larger surrogate scaling factor likely introduced excessive gradient magnitude
+ and reduced optimization stability. These observations suggest that surrogate
+ gradient smoothness and locality around ternary transition regions play an 
+ important role in stabilizing TNN training.
+
+The latent weight distributions also revealed important differences between 
+the surrogate functions. Across all fully connected layers, the smooth 
+threshold-window surrogate generated highly concentrated latent weight
+ distributions centered near zero while still maintaining sufficient spread
+ to support ternary quantization. This behavior indicates improved regularization 
+ and more structured latent-space organization prior to ternary projection.
+ The scaled STE methods produced similar overall distributions, but with 
+ slightly broader spread and less consistent clustering near the ternary 
+ transition boundaries. Furthermore, the ternary weight composition analysis
+ showed that all three methods converged toward sparse ternary representations 
+ dominated by zero-valued weights, particularly in the earlier fully connected 
+ layers. However, the smooth threshold-window surrogate achieved this sparsity 
+ while simultaneously preserving the most stable training behavior, suggesting
+ improved compatibility between the surrogate gradient mechanism and 
+ ternary-constrained optimization.
+
+From a broader neuromorphic and hardware-aware perspective, the smooth 
+threshold-window surrogate is also the most physically meaningful candidate
+ among the evaluated approaches. Unlike the globally scaled STE formulations,
+ which propagate gradients uniformly through the quantization operation, the
+ smooth threshold-window method concentrates meaningful gradient flow near the 
+ ternary switching boundaries. This behavior more closely resembles conductance
+ transition dynamics observed in memristive and threshold-based nanoelectronic
+ devices, where state transitions occur primarily near switching thresholds
+ rather than uniformly across the entire operating range. Consequently, the
+ smooth threshold-window surrogate not only provides strong empirical performance 
+ but also offers improved interpretability and relevance for future hardware
+ implementation of ternary neural networks using emerging in-memory and
+ neuromorphic computing devices.
+ 
+
+
+
+'''
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

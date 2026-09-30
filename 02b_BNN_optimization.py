@@ -38,6 +38,8 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
+from paths import DATA_DIR, PTH_DIR
+
 
 
 
@@ -54,8 +56,6 @@ num_epochs = 100
 SAVE_FIGS = False
 
  
-PTH_DIR= '/Users/apm/Desktop/tern-net/Pth_Models/'
-
 date_name='07_sep_2026'
 
 
@@ -98,14 +98,14 @@ transform = transforms.Compose([
 # 2) Load MNIST
 # ============================================
 train_dataset = datasets.MNIST(
-    root="./data",
+    root=str(DATA_DIR),
     train=True,
     transform=transform,
     download=True
 )
 
 test_dataset = datasets.MNIST(
-    root="./data",
+    root=str(DATA_DIR),
     train=False,
     transform=transform,
     download=True
@@ -366,7 +366,7 @@ checkpoint = {
     'loss': avg_loss
 }
 
-torch.save(checkpoint, f"{PTH_DIR}{date_name}_BNN.pth")
+torch.save(checkpoint, PTH_DIR / f"{date_name}_BNN.pth")
 
 
 

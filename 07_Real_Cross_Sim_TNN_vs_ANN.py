@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 '''
 In The Name of God
 
@@ -66,7 +68,6 @@ Device-Aware Training
 # ============================================
 '''                   Imports              '''
 # ============================================
-from __future__ import annotations
 
 import os
 import random
@@ -95,10 +96,8 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import sys
 from pathlib import Path
-MAIN_DIR = '/Users/apm/Desktop/tern-net'
-CROSS_SIM_DIR = Path(f"{MAIN_DIR}/cross-sim")
-if str(CROSS_SIM_DIR) not in sys.path:
-    sys.path.insert(0, str(CROSS_SIM_DIR))
+from paths import DATA_DIR, PROJECT_DIR, choose_checkpoint, ensure_cross_sim_on_path
+ensure_cross_sim_on_path()
 
 from simulator import CrossSimParameters
 from simulator.parameters.xbar_parameters import ADCRangeLimits
@@ -128,9 +127,6 @@ SAVE_CHECKPOINTS = False
 
 
 
-PTH_DIR= f'{MAIN_DIR}/Pth_Models/'
-
-
 FIGURE_DPI = 150
 THRESHOLD = 0.05
 SMOOTH_TW_WIDTH = 0.7
@@ -139,11 +135,8 @@ DEVICE = torch.device("cpu")
 
 
 
-# Explicit deterministic checkpoint path (no glob / no auto-pick)
-TNN_CHECKPOINT = f"{PTH_DIR}BASE_ANN_TNN_20may_Backup/TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260522.pth"
-
-# or
-# TNN_CHECKPOINT = f"{PTH_DIR}TERNARY_ONLY_mnist_tw0.7_th0.05_seed42_20260525.pth"
+# Listed from Pth_Models. Enter keeps the newest file.
+TNN_CHECKPOINT = choose_checkpoint("tnn")
 
 
 
@@ -158,11 +151,9 @@ R_MAX=4.429246e+09
 from pathlib import Path
 import sys
 
-# from 04_Load_ANN_TNN.py import load_tnn_ternary, print_model_summary
-MAIN_DIR = Path(MAIN_DIR)
-if str(MAIN_DIR) not in sys.path:
-    sys.path.insert(0, str(MAIN_DIR))
 import importlib
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 _load = importlib.import_module("04_Load_ANN_TNN")
 load_tnn_ternary = _load.load_tnn_ternary
 print_model_summary = _load.print_model_summary
@@ -198,7 +189,7 @@ transform = transforms.Compose([
 ])
 
 test_dataset = datasets.MNIST(
-    root="./data",
+    root=str(DATA_DIR),
     train=False,
     download=True,
     transform=transform
