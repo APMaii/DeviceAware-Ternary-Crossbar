@@ -20,6 +20,7 @@ On MNIST, with a 784–256–128–10 network:
 |---|---:|---|
 | Digital ternary network | 93.78% | `03_Base_ANN_TNN.py` |
 | Programming variability only | 92.56% | `08_Real_TNN_Cross_S.py` |
+| Programming variability, 30 realizations | 92.80% ± 0.20% | `08b_Real_TNN_Programming_Error_Monte_Carlo.py` |
 | Programming variability, drift, 6-bit DAC / 4-bit ADC, and $0.01\,\Omega$ interconnect | 81.14% | `09_Final_TNN_Dev_ADC_DAC_Paraisitic.py` |
 | Same hardware model after device-aware training | 93.68% | `10_Device_Aware_Training.py` |
 
@@ -34,7 +35,7 @@ At the gigaohm resistance of these devices, interconnect drop is negligible. In 
 All comparisons use the same multilayer perceptron: flattened MNIST digits, two ReLU hidden layers (256 and 128 units), and 10 logits. Training uses seed 42, batch size 16, and Adam at $10^{-4}$.
 
 - **Full-precision ANN.** Float weights. The hardware counterpart is an 8-bit bit-sliced balanced crossbar.
-- **Binary network.** Forward weights in $\{-1, +1\}$. This is the two-state encoding with no zero synapse (`02b_BNN_optimization.py`).
+- **Binary network.** Forward weights in $\{-1, +1\}$. This is the two-state encoding with no zero synapse (`02b_BNN_optimization.py`). `02c_Optimized_BNN.py` keeps that network and scales each sign by $0.25 / \sqrt{n_\mathrm{in}}$, with latent weights clipped to $[-1, +1]$.
 - **Ternary network.** A float latent weight is trained with a smooth threshold-window surrogate (width 0.7). The exported inference weights are exactly $\{-1, 0, +1\}$, quantized at threshold 0.05 (`03_Base_ANN_TNN.py`).
 
 `05_Device_Modeling.py` builds the device model from measured data. Five Ron–Roff repeats on device D3, in the stable window $t < 1\,\mathrm{s}$, set the target ON and OFF currents at $V_\mathrm{read} = +1\,\mathrm{V}$, and therefore $R_\mathrm{on}$ and $R_\mathrm{off}$. Fifty I–V sweeps in `APM_Datafinal.xlsx` give the programming error about those targets, together with $R_\min$, $R_\max$, and the relative spread of a programmed state. The resulting `APM_SINW_SBFET` model is what CrossSim uses from script 07 onward. `06_Ideal_Cross_Sim.py` first checks that an ideal CrossSim core reproduces the PyTorch ternary accuracy (93.78%) before those non-idealities are enabled.
@@ -48,12 +49,14 @@ Run the scripts in this order. Each one writes checkpoints or constants that the
 | 1 | `01_First_ANN.py` | Full-precision digital baseline (98.00%) |
 | 2 | `02_TNN_Optimization.py` | Choice of the ternary backprop surrogate. The retained setting is the smooth threshold window, width 0.7 |
 | 3 | `02b_BNN_optimization.py` | Binary weight set $\{-1, +1\}$ |
+| 3b | `02c_Optimized_BNN.py` | Same binary network, with $0.25 / \sqrt{n_\mathrm{in}}$ scaling (`28_oct_2026_BNN.pth`) |
 | 4 | `03_Base_ANN_TNN.py` | Digital ANN, trained TNN, and ternary-only weights (93.78%) |
-| 5 | `04_Load_ANN_TNN.py`, `04b_Load_ANN_BNN_TNN.py` | Reload and compare the saved ANN, BNN, and TNN |
+| 5 | `04_Load_ANN_TNN.py`, `04b_Load_ANN_BNN_TNN.py` | Reload and compare the saved ANN, BNN, and TNN. `04b` applies the stored BNN scale when evaluating accuracy |
 | 6 | `05_Device_Modeling.py` | HRS/LRS targets, programming error, drift, $R_\min$, $R_\max$ |
 | 7 | `06_Ideal_Cross_Sim.py` | Ideal CrossSim matches PyTorch (bitsliced ANN and balanced TNN) |
 | 8 | `07_Real_Cross_Sim_TNN_vs_ANN.py` | Programming error on ANN and TNN; array count 16 versus 2 per layer |
 | 9 | `08_Real_TNN_Cross_S.py` | TNN with programming variability (92.56%) and with drift |
+| 9b | `08b_Real_TNN_Programming_Error_Monte_Carlo.py` | Same programming-error setup over 30 independent realizations (92.80% ± 0.20%) |
 | 10 | `09_Final_TNN_Dev_ADC_DAC_Paraisitic.py` | 6-bit DAC / 4-bit ADC and interconnect resistance (81.14%) |
 | 11 | `10_Device_Aware_Training.py` | Device-aware recovery to 93.68% |
 
