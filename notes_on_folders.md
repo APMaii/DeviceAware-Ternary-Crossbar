@@ -35,6 +35,17 @@ Here we trained Binary neural network and we saved with 07_sep_2026_BNN.pth
 
 
 ----
+### 02c_Optimized_BNN.py
+
+Same binary network as 02b, with two training changes only:
+
+- forward weight = sign(latent) * 0.25 / sqrt(fan_in)
+- latent weights clipped to [-1, +1] after every step
+
+Saved as 28_oct_2026_BNN.pth (the checkpoint stores `scale`).
+
+
+----
 ### 03_Base_ANN_TNN.py
 
 In previous files we tried to find the best ANN and TNN and we reach teh best configuration. so here we again train ANN , TNN .
@@ -152,6 +163,14 @@ we load MNISR , we load digital ANN and TNN
 and then we create TNN cross sim (real (non ideal)) with apm model
 
 analzye programming error and drifts.
+
+
+----
+### 08b_Real_TNN_Programming_Error_Monte_Carlo.py
+
+Same programming-error setup as 08, repeated over 30 independent seeds.
+Reports mean, standard deviation, and the 95% confidence interval, and checks
+that the original seed-42 result (92.56%) is reproduced.
 
 
 
