@@ -12,7 +12,8 @@ Last Update : 08 sep 2026
 Load the three trained MNIST networks and plot comparisons only:
 
     ANN  — full-precision floats
-    BNN  — forward weights {-1, +1}  (sign of latent weights in 07_sep_2026_BNN.pth)
+    BNN  — signs {-1, +1}; accuracy uses sign(w) * scale / sqrt(fan_in)
+             when the checkpoint stores scale (28_oct_2026_BNN.pth from 02c)
     TNN  — ternary-only {-1, 0, +1}
 
 '''
@@ -22,6 +23,8 @@ Load the three trained MNIST networks and plot comparisons only:
 # ============================================
 '''                   Imports              '''
 # ============================================
+import copy
+import math
 import os
 import random
 import numpy as np
@@ -63,8 +66,8 @@ POS_COLOR = "#7B2D3B"
 
 MODEL_COLORS = ACADEMIC_COLORS
 
-# BNN checkpoint stores only the final loss; curve taken from the 07 sep 2026 run log.
-BNN_TRAIN_LOSS = [
+# 07 sep 2026 run log (unscaled BNN from 02b). Used when the checkpoint has no scale.
+BNN_TRAIN_LOSS_07_SEP = [
     123.6093, 14.4832, 2.2088, 2.2430, 2.3112, 2.3025, 2.3104, 2.3080, 2.2952, 2.2934,
     2.2667, 2.2806, 2.2753, 2.2316, 2.2031, 2.2341, 2.1799, 2.2032, 2.1452, 2.2074,
     2.1752, 2.1204, 2.1175, 2.1355, 2.1435, 2.1394, 2.1067, 2.1091, 2.0654, 2.1055,
@@ -75,6 +78,20 @@ BNN_TRAIN_LOSS = [
     1.8989, 1.9000, 1.8708, 1.9525, 1.8961, 1.8729, 1.8515, 1.8209, 1.8545, 1.7986,
     1.8435, 1.8094, 1.7658, 1.8275, 1.7805, 1.8175, 1.7628, 1.7571, 1.8131, 1.8038,
     1.7853, 1.7986, 1.8900, 1.7790, 1.7723, 1.7348, 1.7513, 1.8115, 1.8602, 1.7714,
+]
+
+# 28 Oct 2026 run log (02c, SCALE = 0.25). Used when the checkpoint stores scale.
+BNN_TRAIN_LOSS_28_OCT = [
+    1.3637, 1.1078, 1.0730, 1.0527, 1.0389, 1.0298, 1.0232, 1.0183, 1.0136, 1.0100,
+    1.0068, 1.0040, 1.0012, 0.9987, 0.9966, 0.9944, 0.9925, 0.9907, 0.9892, 0.9878,
+    0.9863, 0.9851, 0.9836, 0.9824, 0.9815, 0.9806, 0.9789, 0.9776, 0.9763, 0.9754,
+    0.9743, 0.9735, 0.9727, 0.9720, 0.9711, 0.9702, 0.9694, 0.9686, 0.9680, 0.9674,
+    0.9667, 0.9662, 0.9657, 0.9650, 0.9645, 0.9637, 0.9632, 0.9626, 0.9622, 0.9617,
+    0.9612, 0.9608, 0.9603, 0.9598, 0.9593, 0.9588, 0.9582, 0.9578, 0.9572, 0.9571,
+    0.9567, 0.9561, 0.9558, 0.9553, 0.9551, 0.9548, 0.9546, 0.9543, 0.9538, 0.9535,
+    0.9533, 0.9529, 0.9527, 0.9522, 0.9520, 0.9514, 0.9511, 0.9509, 0.9506, 0.9504,
+    0.9499, 0.9496, 0.9493, 0.9489, 0.9487, 0.9482, 0.9479, 0.9477, 0.9473, 0.9469,
+    0.9465, 0.9463, 0.9461, 0.9457, 0.9455, 0.9449, 0.9447, 0.9444, 0.9444, 0.9441,
 ]
 
 
@@ -170,12 +187,32 @@ def load_ann(checkpoint, device=DEVICE):
 
 
 def load_bnn(checkpoint, device=DEVICE):
-    """Load BNN latent weights, then binarize to {-1, +1} for inference / plots."""
+    """Load BNN latent weights, then binarize to {-1, +1} for plots.
+
+    Accuracy must use scaled_binary_for_eval: training in 02c multiplies
+    those signs by scale / sqrt(fan_in). The ±1 copy is only for figures.
+    """
     path = _require_checkpoint(checkpoint)
     model, meta = _load_from_checkpoint(path, device)
     _binarize_weights_(model)
     _verify_binary_weights(model, path.name)
     return model, path, meta
+
+
+def scaled_binary_for_eval(model: ANN, scale) -> ANN:
+    """Deployed BNN weights: sign(w) * scale / sqrt(fan_in).
+
+    scale is None for an unscaled ±1 checkpoint. The plot model is unchanged.
+    """
+    if scale is None:
+        return model
+    scaled = copy.deepcopy(model)
+    factor = float(scale)
+    with torch.no_grad():
+        for name in ("fc1", "fc2", "fc3"):
+            layer = getattr(scaled, name)
+            layer.weight.mul_(factor / math.sqrt(layer.weight.shape[1]))
+    return scaled
 
 
 def load_tnn_ternary(checkpoint, device=DEVICE):
@@ -330,11 +367,19 @@ def _extract_train_loss(meta: dict, fallback=None):
 
 
 def collect_train_losses(ann_meta, bnn_meta, tnn_train_meta=None):
-    """ANN/TNN from checkpoints; BNN from checkpoint or the 07 sep run log."""
+    """ANN/TNN from checkpoints; BNN from checkpoint or the matching run log.
+
+    02b (no scale) uses the 07 Sep curve. 02c stores scale and uses the
+    28 Oct curve. A checkpoint that already stores train_loss wins.
+    """
     tnn_meta = tnn_train_meta or {}
+    if isinstance(bnn_meta, dict) and bnn_meta.get("scale") is not None:
+        bnn_fallback = BNN_TRAIN_LOSS_28_OCT
+    else:
+        bnn_fallback = BNN_TRAIN_LOSS_07_SEP
     histories = {
         "ANN": _extract_train_loss(ann_meta),
-        "BNN": _extract_train_loss(bnn_meta, fallback=BNN_TRAIN_LOSS),
+        "BNN": _extract_train_loss(bnn_meta, fallback=bnn_fallback),
         "TNN": _extract_train_loss(tnn_meta),
     }
     missing = [k for k, v in histories.items() if not v]
@@ -710,7 +755,10 @@ if __name__ == "__main__":
 
     test_loader = make_loaders()
     ann_acc, ann_pc = evaluate_accuracy(net_ann, test_loader)
-    bnn_acc, bnn_pc = evaluate_accuracy(net_bnn, test_loader)
+    bnn_scale = bnn_meta.get("scale") if isinstance(bnn_meta, dict) else None
+    bnn_acc, bnn_pc = evaluate_accuracy(
+        scaled_binary_for_eval(net_bnn, bnn_scale), test_loader
+    )
     tnn_acc, tnn_pc = evaluate_accuracy(net_tnn, test_loader)
 
     print_model_summary(net_ann, "ANN (full-precision)", ann_path, ann_meta, acc=ann_acc)
